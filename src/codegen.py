@@ -202,7 +202,6 @@ def r_code(
         fetch_block = f'''\
 library(tidyverse)
 library(plotly)
-library(httr2)
 
 # --- Fetch data (Our World in Data) ---
 slug <- "{indicator['slug']}"
@@ -210,48 +209,36 @@ url  <- paste0("https://ourworldindata.org/grapher/", slug, ".csv")
 
 df_raw <- read_csv(url, show_col_types = FALSE)
 
-# Normalise: last column is the value
-value_col <- tail(names(df_raw), 1)
+# First non-metadata column is the value
+value_col <- setdiff(names(df_raw), c("Entity", "Code", "Year"))[1]
 df <- df_raw |>
-  rename(entity = Entity, iso3 = Code, year = Year, value = !!sym(value_col)) |>
+  rename(entity = Entity, iso3 = Code, year = Year, value = all_of(value_col)) |>
   select(entity, iso3, year, value) |>
-  drop_na(value)
+  drop_na(value) |>
+  filter(nchar(iso3) == 3)
 '''
     else:
         code = indicator["indicator"]
         fetch_block = f'''\
 library(tidyverse)
+library(WDI)
 library(plotly)
-library(httr2)
-
-WB_AGGREGATES <- c(
-  "AFE","AFW","ARB","CAA","CEB","CSS","EAP","EAR","EAS","ECA","ECS","EMU",
-  "EUU","FCS","HIC","HPC","IBD","IBT","IDA","IDX","LAC","LCN","LDC","LIC",
-  "LMC","LMY","MEA","MIC","MNA","NAC","OEC","OSS","PRE","PSS","PST","SAR",
-  "SAS","SSA","SSF","SST","TEA","TEC","TLA","TMN","TSA","TSS","UMC","WLD"
-)
-
-fetch_wdi <- function(code) {{
-  url <- paste0(
-    "https://api.worldbank.org/v2/country/all/indicator/", code,
-    "?format=json&date=1960:2024&per_page=20000"
-  )
-  resp  <- request(url) |> req_perform() |> resp_body_json()
-  items <- resp[[2]]
-  purrr::map_dfr(items, function(rec) {{
-    iso3 <- rec$countryiso3code %||% ""
-    if (is.null(rec$value) || iso3 %in% WB_AGGREGATES) return(NULL)
-    tibble(
-      entity = rec$country$value,
-      iso3   = iso3,
-      year   = as.integer(rec$date),
-      value  = as.numeric(rec$value)
-    )
-  }})
-}}
 
 # --- Fetch data (World Bank WDI) ---
-df <- fetch_wdi("{code}")
+# install.packages("WDI") if needed
+df_raw <- WDI(
+  indicator = "{code}",
+  country   = "all",
+  start     = 1960,
+  end       = {year_range[1]},
+  extra     = FALSE
+)
+
+df <- df_raw |>
+  rename(entity = country, iso3 = iso3c, value = {code}) |>
+  select(entity, iso3, year, value) |>
+  drop_na(value) |>
+  filter(nchar(iso3) == 3)
 '''
 
     # ── Filter block ──────────────────────────────────────────────────────────
@@ -262,7 +249,6 @@ countries <- {countries_r}
 
 filtered <- df |>
   filter(
-    nchar(iso3) == 3,
     entity %in% countries,
     year >= {year_range[0]},
     year <= {year_range[1]}

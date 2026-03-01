@@ -338,6 +338,11 @@ def data_page():
         chart_subtitle = st.text_input("Subtitle", placeholder="e.g. 2000–2023, Sub-Saharan Africa")
         chart_source   = st.text_input("Source note", value=src_label,
                                        help="Footnote shown at the bottom of the chart")
+        axis_col1, axis_col2 = st.columns(2)
+        with axis_col1:
+            x_label = st.text_input("X label", placeholder="Year")
+        with axis_col2:
+            y_label = st.text_input("Y label", placeholder=indicator["unit"])
         log_scale      = st.checkbox("Logarithmic scale")
         color_scale    = st.selectbox(
             "Color palette",
@@ -405,6 +410,8 @@ def data_page():
             log_scale=log_scale,
             subtitle=chart_subtitle,
             source=chart_source,
+            xlabel=x_label,
+            ylabel=y_label,
         )
         if "Map" in chart_type:
             fig = make_map(
@@ -412,7 +419,9 @@ def data_page():
                 title=chart_title,
                 color_scale=color_scale,
                 indicator=indicator,   # raw unit for map
-                **shared_kw,
+                log_scale=log_scale,
+                subtitle=chart_subtitle,
+                source=chart_source,
             )
         elif "Line" in chart_type:
             fig = make_line(filtered_t, title=chart_title, indicator=indicator_t, **shared_kw)

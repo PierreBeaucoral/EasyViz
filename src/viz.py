@@ -24,31 +24,31 @@ def _base_layout(
     source: str = "",
     extra_margin_b: int = 0,
 ) -> go.Figure:
-    # Title with optional subtitle as a smaller second line
     title_text = title
     if subtitle:
         title_text = f"{title}<br><sup style='color:#64748B'>{subtitle}</sup>"
 
-    # Source footnote as a chart annotation
+    # Source footnote placed well below the x-axis tick labels
     annotations = []
     if source:
         annotations.append(dict(
             text=f"Source: {source}",
             xref="paper", yref="paper",
-            x=0, y=-0.06,
+            x=0, y=-0.18,
             showarrow=False,
             font=dict(size=10, color="#94A3B8"),
             align="left",
         ))
 
-    bottom_margin = 60 + extra_margin_b if source else 40 + extra_margin_b
+    # Enough bottom margin so source text sits below x-axis ticks
+    bottom_margin = 90 + extra_margin_b if source else 50 + extra_margin_b
 
     fig.update_layout(
         title=dict(text=title_text, font=dict(size=18, color="#0F172A"), x=0.01),
         font=_FONT,
         paper_bgcolor="white",
         plot_bgcolor="white",
-        margin=dict(t=70, b=bottom_margin, l=40, r=20),
+        margin=dict(t=70, b=bottom_margin, l=60, r=20),
         hoverlabel=dict(bgcolor="white", font_size=13, font_family="Inter, Arial"),
         annotations=annotations,
     )
@@ -114,6 +114,8 @@ def make_line(
     log_scale: bool = False,
     subtitle: str = "",
     source: str = "",
+    xlabel: str = "Year",
+    ylabel: str = "",
 ) -> go.Figure:
     df = df.dropna(subset=["value"]).copy()
 
@@ -122,11 +124,13 @@ def make_line(
         df, suffix = _apply_log(df)
         unit_label = f"{unit_label} {suffix}"
 
+    y_label = ylabel if ylabel else unit_label
+
     fig = px.line(
         df.sort_values("year"),
         x="year", y="value", color="entity",
         markers=True,
-        labels={"value": unit_label, "year": "Year", "entity": "Country"},
+        labels={"value": y_label, "year": xlabel, "entity": "Country"},
         template=_TEMPLATE,
     )
     fig.update_traces(
@@ -160,6 +164,8 @@ def make_bar(
     top_n: int = 25,
     subtitle: str = "",
     source: str = "",
+    xlabel: str = "",
+    ylabel: str = "",
 ) -> go.Figure:
     df = df.dropna(subset=["value"]).sort_values("value", ascending=False).head(top_n).copy()
 
@@ -168,11 +174,13 @@ def make_bar(
         df, suffix = _apply_log(df)
         unit_label = f"{unit_label} {suffix}"
 
+    x_label = xlabel if xlabel else unit_label
+
     fig = px.bar(
         df.sort_values("value"),
         x="value", y="entity", orientation="h",
         color="value", color_continuous_scale=color_scale,
-        labels={"value": unit_label, "entity": ""},
+        labels={"value": x_label, "entity": ylabel},
         template=_TEMPLATE,
     )
     fig.update_traces(
