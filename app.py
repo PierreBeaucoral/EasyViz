@@ -350,19 +350,40 @@ def data_page():
              "Oranges", "Greens", "Cividis", "Turbo", "Reds"],
         )
 
-        # Always-defined year / bar vars (widgets shown conditionally)
-        map_year = year_range[1]
-        bar_year = year_range[1]
-        top_n    = 20
+        # Always-defined vars (widgets shown conditionally)
+        _AGG_OPTS = ["Mean", "Sum", "Median", "Min", "Max"]
+        map_year    = year_range[1]
+        map_mode    = "Single year"
+        map_agg     = "Mean"
+        bar_year    = year_range[1]
+        bar_mode    = "Single year"
+        bar_agg     = "Mean"
+        top_n       = 20
+
         if "Map" in chart_type:
-            map_year = st.number_input(
-                "Map year", min_value=year_min, max_value=year_max, value=year_range[1]
+            map_mode = st.radio(
+                "Map period", ["Single year", "Aggregate over range"],
+                horizontal=True, key="map_mode",
             )
+            if map_mode == "Single year":
+                map_year = st.number_input(
+                    "Year", min_value=year_min, max_value=year_max, value=year_range[1]
+                )
+            else:
+                map_agg = st.selectbox("Aggregation", _AGG_OPTS, key="map_agg")
+
         if "Bar" in chart_type:
-            bar_year = st.number_input(
-                "Bar year",
-                min_value=year_range[0], max_value=year_range[1], value=year_range[1],
+            bar_mode = st.radio(
+                "Bar period", ["Single year", "Aggregate over range"],
+                horizontal=True, key="bar_mode",
             )
+            if bar_mode == "Single year":
+                bar_year = st.number_input(
+                    "Year",
+                    min_value=year_range[0], max_value=year_range[1], value=year_range[1],
+                )
+            else:
+                bar_agg = st.selectbox("Aggregation", _AGG_OPTS, key="bar_agg")
             top_n = st.slider("Top N countries", 5, 50, 20)
 
     # ── Apply transform ───────────────────────────────────────────────────────
@@ -403,9 +424,23 @@ def data_page():
     # Build a patched indicator dict with the transformed unit label
     indicator_t = {**indicator, "unit": unit_label}
 
+    # ── Period aggregation helper ─────────────────────────────────────────────
+    _AGG_FUNCS = {"Mean": "mean", "Sum": "sum", "Median": "median",
+                  "Min": "min", "Max": "max"}
+
+    def _aggregate(data, agg_label):
+        """Collapse all years into one row per country using the chosen function."""
+        return (
+            data.dropna(subset=["value"])
+            .groupby(["entity", "iso3"], as_index=False)["value"]
+            .agg(_AGG_FUNCS[agg_label])
+        )
+
+    def _period_label(agg_label):
+        return f"{agg_label} {year_range[0]}–{year_range[1]}"
+
     # ── Build & display chart ─────────────────────────────────────────────────
     with col_chart:
-        # Map uses raw data (transforms need time series); Line/Bar use filtered_t
         shared_kw = dict(
             log_scale=log_scale,
             subtitle=chart_subtitle,
@@ -413,12 +448,19 @@ def data_page():
             xlabel=x_label,
             ylabel=y_label,
         )
+
         if "Map" in chart_type:
+            if map_mode == "Single year":
+                map_data   = df[df["year"] == map_year]
+                map_title  = chart_title
+            else:
+                map_data  = _aggregate(df[df["year"].between(*year_range)], map_agg)
+                map_title = f"{chart_title} ({_period_label(map_agg)})"
             fig = make_map(
-                df[df["year"] == map_year],
-                title=chart_title,
+                map_data,
+                title=map_title,
                 color_scale=color_scale,
-                indicator=indicator,   # raw unit for map
+                indicator=indicator,
                 log_scale=log_scale,
                 subtitle=chart_subtitle,
                 source=chart_source,
@@ -426,9 +468,15 @@ def data_page():
         elif "Line" in chart_type:
             fig = make_line(filtered_t, title=chart_title, indicator=indicator_t, **shared_kw)
         else:
+            if bar_mode == "Single year":
+                bar_data  = filtered_t[filtered_t["year"] == bar_year].sort_values("value", ascending=False)
+                bar_title = f"{chart_title} ({bar_year})"
+            else:
+                bar_data  = _aggregate(filtered_t, bar_agg).sort_values("value", ascending=False)
+                bar_title = f"{chart_title} ({_period_label(bar_agg)})"
             fig = make_bar(
-                filtered_t[filtered_t["year"] == bar_year].sort_values("value", ascending=False),
-                title=f"{chart_title} ({bar_year})",
+                bar_data,
+                title=bar_title,
                 color_scale=color_scale,
                 top_n=top_n,
                 indicator=indicator_t,
