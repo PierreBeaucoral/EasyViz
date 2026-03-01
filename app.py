@@ -81,6 +81,8 @@ DEFAULT_COUNTRIES = [
 
 if "selected_id" not in st.session_state:
     st.session_state.selected_id = None
+if "page" not in st.session_state:
+    st.session_state.page = "home"  # "home" | "about" | "data"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -179,9 +181,16 @@ def home_page():
                             st.session_state.selected_id = ind["id"]
                             st.rerun()
 
+        st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)
+        _, btn_col, _ = st.columns([2, 1, 2])
+        with btn_col:
+            if st.button("ℹ️  How it works", use_container_width=True):
+                st.session_state.page = "about"
+                st.rerun()
+
         st.markdown(
-            "<p style='text-align:center;color:#CBD5E1;font-size:0.75rem;margin-top:48px'>"
-            "Data: Our World in Data · World Bank WDI</p>",
+            "<p style='text-align:center;color:#CBD5E1;font-size:0.75rem;margin-top:24px'>"
+            "Data: World Bank WDI</p>",
             unsafe_allow_html=True,
         )
 
@@ -200,6 +209,7 @@ def data_page():
         )
         if st.button("← New search", use_container_width=True):
             st.session_state.selected_id = None
+            st.session_state.page = "home"
             st.rerun()
 
         st.divider()
@@ -562,10 +572,132 @@ def data_page():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# ABOUT PAGE
+# ══════════════════════════════════════════════════════════════════════════════
+
+def about_page():
+    # Hide sidebar
+    st.markdown("""
+    <style>
+    section[data-testid="stSidebar"]  { display: none !important; }
+    [data-testid="collapsedControl"]   { display: none !important; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    _, col, _ = st.columns([1, 3, 1])
+    with col:
+        if st.button("← Back to home"):
+            st.session_state.page = "home"
+            st.rerun()
+
+        st.markdown(
+            "<h1 style='font-size:2.2rem;margin-top:24px'>🌍 DevViz</h1>"
+            "<p style='color:#64748B;font-size:1.05rem;margin-bottom:32px'>"
+            "A lightweight development data explorer — search, visualise, customise, download.</p>",
+            unsafe_allow_html=True,
+        )
+
+        # ── How to use ───────────────────────────────────────────────────────
+        st.markdown("## How to use it")
+        steps = [
+            ("🔍", "Search", "Type any topic on the home page — *child mortality*, *GDP*, *CO₂*, *poverty*. Results are ranked by relevance."),
+            ("📊", "Pick a chart", "Choose between a **World Map**, a **Line Chart** (countries over time), or a **Bar Chart** (country ranking for a given period)."),
+            ("🌍", "Select countries & years", "Use the multiselect to choose which countries appear in Line and Bar charts. The year range slider filters all charts."),
+            ("⚙️", "Customise", "Edit the title, add a subtitle, change the colour palette, toggle log scale, or relabel the axes."),
+            ("🔄", "Transform", "Apply transformations to your data before plotting: normalise to % of max, compute % change vs first year, cumulative sum, rolling average, or rank."),
+            ("📅", "Aggregate over periods", "For maps and bar charts, instead of picking a single year you can aggregate the whole selected period using mean, sum, median, min, or max."),
+            ("⬇️", "Download", "Export the underlying data as **CSV**, the chart as **PNG**, **SVG** (vector, ideal for papers), or **HTML** (interactive, embeddable)."),
+            ("👩‍💻", "Get the code", "Every chart comes with a ready-to-run **Python** and **R** script — open the *Reproduce this chart* panel at the bottom."),
+        ]
+        for icon, title, desc in steps:
+            st.markdown(
+                f"<div style='display:flex;gap:16px;margin-bottom:20px;align-items:flex-start'>"
+                f"<div style='font-size:1.6rem;min-width:36px'>{icon}</div>"
+                f"<div><strong>{title}</strong><br>"
+                f"<span style='color:#475569'>{desc}</span></div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+        st.divider()
+
+        # ── Available indicators ──────────────────────────────────────────────
+        st.markdown("## Available indicators")
+        from src.catalog import INDICATORS, CATEGORIES
+
+        for cat in CATEGORIES:
+            icon = CAT_ICON.get(cat, "📊")
+            inds = [i for i in INDICATORS if i["category"] == cat]
+            with st.expander(f"{icon} {cat} — {len(inds)} indicators"):
+                rows = []
+                for ind in inds:
+                    rows.append(f"**{ind['name']}** · *{ind['unit']}* · `{ind['indicator']}`")
+                st.markdown("  \n".join(f"- {r}" for r in rows))
+
+        st.divider()
+
+        # ── Data sources ─────────────────────────────────────────────────────
+        st.markdown("## Data sources")
+        st.markdown("""
+All indicators come from the **World Bank World Development Indicators (WDI)** —
+the most comprehensive cross-country development database, updated annually.
+
+| Source | Coverage | Access |
+|---|---|---|
+| World Bank WDI | ~220 countries · 1960–2024 | Free, open API |
+
+Data is fetched live on first use and cached for **1 hour** to keep the app responsive.
+        """)
+
+        st.divider()
+
+        # ── Transforms reference ──────────────────────────────────────────────
+        st.markdown("## Data transforms")
+        st.markdown("""
+Available under *Transform data* in the Customise panel. Applied before plotting to Line and Bar charts.
+
+| Transform | What it does | When to use it |
+|---|---|---|
+| **% of max** | Rescales all values 0–100, where 100 = the global maximum | Compare countries on different scales |
+| **% change vs first year** | Growth relative to the first year in range | Track progress or divergence over time |
+| **Cumulative sum** | Running total per country | Useful for flow variables (ODA, CO₂) |
+| **Rolling avg (3 yr)** | 3-year moving average | Smooth out noisy annual data |
+| **Rank** | 1 = highest value that year | Compare relative positions over time |
+        """)
+
+        st.divider()
+
+        # ── Period aggregation reference ──────────────────────────────────────
+        st.markdown("## Period aggregation (Map & Bar)")
+        st.markdown("""
+Instead of picking a single year, you can summarise across the whole selected period.
+
+| Method | Formula | When to use it |
+|---|---|---|
+| **Mean** | Average value across years | Most indicators (stock variables) |
+| **Sum** | Total accumulated over years | Flow variables (ODA, emissions) |
+| **Median** | Middle value — robust to outliers | When a few extreme years skew the mean |
+| **Min / Max** | Lowest or highest observed value | Identify best/worst periods |
+        """)
+
+        st.markdown(
+            "<br><p style='text-align:center;color:#94A3B8;font-size:0.78rem'>"
+            "Data: <a href='https://data.worldbank.org' target='_blank'>World Bank WDI</a> · "
+            "Built with <a href='https://streamlit.io' target='_blank'>Streamlit</a> + "
+            "<a href='https://plotly.com' target='_blank'>Plotly</a></p>",
+            unsafe_allow_html=True,
+        )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # ROUTER
 # ══════════════════════════════════════════════════════════════════════════════
 
-if st.session_state.selected_id is None:
-    home_page()
-else:
+if st.session_state.page == "about":
+    about_page()
+elif st.session_state.selected_id is not None:
+    st.session_state.page = "data"
     data_page()
+else:
+    st.session_state.page = "home"
+    home_page()
