@@ -11,6 +11,7 @@ from src.catalog import INDICATORS
 from src.codegen import python_code, r_code
 from src.fetcher import fetch_data
 from src.search import fuzzy_search
+from src.uploader import detect_columns, detect_format, normalise, read_uploaded_file
 from src.viz import MAP_SCOPES, make_bar, make_line, make_map
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -182,8 +183,12 @@ def home_page():
                             st.rerun()
 
         st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)
-        _, btn_col, _ = st.columns([2, 1, 2])
-        with btn_col:
+        _, btn1, btn2, _ = st.columns([2, 1, 1, 2])
+        with btn1:
+            if st.button("📤  Upload data", use_container_width=True):
+                st.session_state.page = "upload"
+                st.rerun()
+        with btn2:
             if st.button("ℹ️  How it works", use_container_width=True):
                 st.session_state.page = "about"
                 st.rerun()
@@ -201,6 +206,35 @@ def home_page():
 
 def data_page():
 
+    # ── Resolve indicator FIRST ───────────────────────────────────────────────
+    current_id = st.session_state.selected_id
+    is_custom  = (current_id == "__custom__")
+
+    if is_custom:
+        indicator = st.session_state.get("custom_indicator", {
+            "id": "__custom__", "name": "Custom dataset",
+            "category": "Custom", "source": "upload", "unit": "value", "tags": [],
+        })
+    else:
+        indicator = next((r for r in INDICATORS if r["id"] == current_id), None)
+        if indicator is None:
+            st.error("Indicator not found — please go back and search again.")
+            if st.button("← Back to home"):
+                st.session_state.page = "home"
+                st.session_state.selected_id = None
+                st.rerun()
+            return
+
+    if indicator["source"] == "upload":
+        src_label = "Your dataset"
+        src_color = "#8B5CF6"
+    elif indicator["source"] == "owid":
+        src_label = "Our World in Data"
+        src_color = "#10B981"
+    else:
+        src_label = "World Bank"
+        src_color = "#3B82F6"
+
     # ── Sidebar ───────────────────────────────────────────────────────────────
     with st.sidebar:
         st.markdown(
@@ -213,30 +247,34 @@ def data_page():
             st.rerun()
 
         st.divider()
-        st.markdown("**Switch indicator**")
-        query_sb = st.text_input(
-            "sb_search", placeholder="Search…",
-            label_visibility="collapsed", key="sidebar_search",
-        )
-        sb_results = fuzzy_search(query_sb, INDICATORS, limit=12) if query_sb else INDICATORS
-        selected_id = st.radio(
-            "Select:",
-            options=[r["id"] for r in sb_results],
-            index=next(
-                (i for i, r in enumerate(sb_results)
-                 if r["id"] == st.session_state.selected_id), 0,
-            ),
-            format_func=lambda x: next(r["name"] for r in INDICATORS if r["id"] == x),
-            label_visibility="collapsed",
-        )
-        if selected_id != st.session_state.selected_id:
-            st.session_state.selected_id = selected_id
-            st.rerun()
+        if is_custom:
+            st.caption("📤 Custom uploaded dataset")
+            if st.button("↑ Upload another file", use_container_width=True):
+                st.session_state.page = "upload"
+                st.session_state.selected_id = None
+                st.rerun()
+        else:
+            st.markdown("**Switch indicator**")
+            query_sb = st.text_input(
+                "sb_search", placeholder="Search…",
+                label_visibility="collapsed", key="sidebar_search",
+            )
+            sb_results = fuzzy_search(query_sb, INDICATORS, limit=12) if query_sb else INDICATORS
+            selected_id = st.radio(
+                "Select:",
+                options=[r["id"] for r in sb_results],
+                index=next(
+                    (i for i, r in enumerate(sb_results)
+                     if r["id"] == st.session_state.selected_id), 0,
+                ),
+                format_func=lambda x: next(r["name"] for r in INDICATORS if r["id"] == x),
+                label_visibility="collapsed",
+            )
+            if selected_id != st.session_state.selected_id:
+                st.session_state.selected_id = selected_id
+                st.rerun()
 
         st.divider()
-        indicator = next(r for r in INDICATORS if r["id"] == selected_id)
-        src_label = "Our World in Data" if indicator["source"] == "owid" else "World Bank"
-        src_color = "#10B981" if indicator["source"] == "owid" else "#3B82F6"
         st.markdown(
             f"<span style='background:{src_color};color:white;padding:3px 10px;"
             f"border-radius:20px;font-size:0.78rem;font-weight:600'>{src_label}</span>",
@@ -248,8 +286,11 @@ def data_page():
         )
 
     # ── Load data ─────────────────────────────────────────────────────────────
-    with st.spinner(f"Loading **{indicator['name']}**…"):
-        df = fetch_data(indicator)
+    if is_custom:
+        df = st.session_state.get("custom_df")
+    else:
+        with st.spinner(f"Loading **{indicator['name']}**…"):
+            df = fetch_data(indicator)
 
     if df is None or df.empty:
         st.error(
@@ -534,35 +575,36 @@ def data_page():
             st.button("⬇️ SVG (needs kaleido)", disabled=True, use_container_width=True)
 
     # ── Reproduce this chart ──────────────────────────────────────────────────
-    st.divider()
-    with st.expander("👩‍💻 Reproduce this chart — get the code"):
-        _code_kw = dict(
-            indicator=indicator,
-            selected_countries=_countries,
-            year_range=year_range,
-            chart_type=chart_type,
-            map_year=map_year,
-            bar_year=bar_year,
-            top_n=top_n,
-            log_scale=log_scale,
-            color_scale=color_scale,
-            chart_title=chart_title,
-        )
-        tab_py, tab_r = st.tabs(["🐍 Python", "📦 R"])
-        with tab_py:
-            py_script = python_code(**_code_kw)
-            st.code(py_script, language="python")
-            st.download_button(
-                "⬇️ Download .py", py_script,
-                f"{indicator['id']}_chart.py", "text/x-python",
+    if not is_custom:
+        st.divider()
+        with st.expander("👩‍💻 Reproduce this chart — get the code"):
+            _code_kw = dict(
+                indicator=indicator,
+                selected_countries=_countries,
+                year_range=year_range,
+                chart_type=chart_type,
+                map_year=map_year,
+                bar_year=bar_year,
+                top_n=top_n,
+                log_scale=log_scale,
+                color_scale=color_scale,
+                chart_title=chart_title,
             )
-        with tab_r:
-            r_script = r_code(**_code_kw)
-            st.code(r_script, language="r")
-            st.download_button(
-                "⬇️ Download .R", r_script,
-                f"{indicator['id']}_chart.R", "text/plain",
-            )
+            tab_py, tab_r = st.tabs(["🐍 Python", "📦 R"])
+            with tab_py:
+                py_script = python_code(**_code_kw)
+                st.code(py_script, language="python")
+                st.download_button(
+                    "⬇️ Download .py", py_script,
+                    f"{indicator['id']}_chart.py", "text/x-python",
+                )
+            with tab_r:
+                r_script = r_code(**_code_kw)
+                st.code(r_script, language="r")
+                st.download_button(
+                    "⬇️ Download .R", r_script,
+                    f"{indicator['id']}_chart.R", "text/plain",
+                )
 
     # ── Footer ────────────────────────────────────────────────────────────────
     st.markdown(
@@ -572,6 +614,152 @@ def data_page():
         "Built with Streamlit + Plotly</p>",
         unsafe_allow_html=True,
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# UPLOAD PAGE
+# ══════════════════════════════════════════════════════════════════════════════
+
+def upload_page():
+    st.markdown("""
+    <style>
+    section[data-testid="stSidebar"]  { display: none !important; }
+    [data-testid="collapsedControl"]   { display: none !important; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    _, col, _ = st.columns([1, 3, 1])
+    with col:
+        if st.button("← Back to home"):
+            st.session_state.page = "home"
+            st.rerun()
+
+        st.markdown(
+            "<h1 style='font-size:2rem;margin-top:20px'>📤 Upload your data</h1>"
+            "<p style='color:#64748B'>CSV or Excel — any structure. "
+            "The app detects columns automatically; you confirm the mapping.</p>",
+            unsafe_allow_html=True,
+        )
+
+        # ── Step 1: file upload ───────────────────────────────────────────────
+        uploaded = st.file_uploader(
+            "Drop your file here",
+            type=["csv", "xlsx", "xls"],
+            label_visibility="collapsed",
+        )
+        if not uploaded:
+            st.info("Accepted formats: **CSV** (any separator) · **XLSX / XLS**")
+            return
+
+        df_raw = read_uploaded_file(uploaded)
+        if df_raw is None or df_raw.empty:
+            st.error("Could not read the file. Check that it is a valid CSV or Excel file.")
+            return
+
+        st.success(f"File read: **{df_raw.shape[0]:,}** rows × **{df_raw.shape[1]}** columns.")
+
+        with st.expander("Preview (first 10 rows)", expanded=True):
+            st.dataframe(df_raw.head(10), use_container_width=True)
+
+        st.divider()
+
+        # ── Step 2: format & column mapping ──────────────────────────────────
+        st.markdown("### Column mapping")
+
+        auto = detect_columns(df_raw)
+        fmt  = detect_format(df_raw)
+
+        col_a, col_b = st.columns(2)
+        with col_a:
+            fmt_choice = st.radio(
+                "Data format",
+                ["Long (one row per country-year)", "Wide (years as columns)"],
+                index=0 if fmt == "long" else 1,
+                help="**Long**: each row is one country × one year.  \n"
+                     "**Wide**: each row is one country, years are column headers.",
+            )
+        is_wide = "Wide" in fmt_choice
+
+        all_cols = list(df_raw.columns)
+
+        with col_b:
+            entity_is_iso3 = st.checkbox(
+                "Country column already contains ISO3 codes",
+                value=False,
+                help="Tick this if your country column has codes like FRA, NGA, USA…",
+            )
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            entity_col = st.selectbox(
+                "Country / Entity column",
+                all_cols,
+                index=all_cols.index(auto["entity"]) if auto["entity"] in all_cols else 0,
+            )
+        with c2:
+            if not is_wide:
+                year_options = ["(none — single period)"] + all_cols
+                year_default = auto["year"] if auto["year"] in all_cols else "(none — single period)"
+                year_sel = st.selectbox("Year column", year_options,
+                                        index=year_options.index(year_default))
+                year_col = None if year_sel.startswith("(none") else year_sel
+            else:
+                st.info("Wide format: year columns are auto-detected from headers.")
+                year_col = None
+
+        with c3:
+            if not is_wide:
+                val_opts = auto["value_candidates"] or [c for c in all_cols
+                                                         if c not in (entity_col, year_col)]
+                value_col = st.selectbox(
+                    "Value column",
+                    val_opts if val_opts else all_cols,
+                    index=0,
+                )
+            else:
+                value_col = entity_col  # placeholder; wide path ignores this
+
+        st.divider()
+
+        # ── Step 3: indicator metadata ────────────────────────────────────────
+        st.markdown("### Indicator info")
+        m1, m2 = st.columns(2)
+        with m1:
+            ind_name = st.text_input("Indicator name", value=uploaded.name.rsplit(".", 1)[0])
+        with m2:
+            ind_unit = st.text_input("Unit", placeholder="e.g. % of population, USD per capita")
+
+        st.divider()
+
+        # ── Step 4: normalise & plot ──────────────────────────────────────────
+        if st.button("📊  Plot it", type="primary", use_container_width=True):
+            with st.spinner("Processing…"):
+                df_norm = normalise(
+                    df_raw,
+                    entity_col=entity_col,
+                    year_col=year_col,
+                    value_col=value_col,
+                    fmt="wide" if is_wide else "long",
+                    entity_is_iso3=entity_is_iso3,
+                )
+
+            if df_norm.empty:
+                st.error("No valid rows after processing. Check the column mapping.")
+                return
+
+            # Store in session state and navigate to data page
+            st.session_state.custom_df = df_norm
+            st.session_state.custom_indicator = {
+                "id":        "__custom__",
+                "name":      ind_name or "Custom dataset",
+                "category":  "Custom",
+                "source":    "upload",
+                "unit":      ind_unit or "value",
+                "tags":      [],
+            }
+            st.session_state.selected_id = "__custom__"
+            st.session_state.page = "data"
+            st.rerun()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -698,6 +886,8 @@ Instead of picking a single year, you can summarise across the whole selected pe
 
 if st.session_state.page == "about":
     about_page()
+elif st.session_state.page == "upload":
+    upload_page()
 elif st.session_state.selected_id is not None:
     st.session_state.page = "data"
     data_page()
