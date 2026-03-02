@@ -4,8 +4,17 @@ All functions return a go.Figure ready for st.plotly_chart.
 """
 
 import numpy as np
+import plotly.colors as pc
 import plotly.express as px
 import plotly.graph_objects as go
+
+
+def _scale_color(color_scale: str, pos: float = 0.65) -> str:
+    """Extract a single representative colour from a named Plotly colorscale."""
+    try:
+        return pc.sample_colorscale(color_scale, [pos])[0]
+    except Exception:
+        return "#2563EB"
 
 _TEMPLATE = "plotly_white"
 _FONT = dict(family="Inter, Arial, sans-serif", size=13, color="#1E293B")
@@ -214,7 +223,47 @@ def make_bar(
     return fig
 
 
-# ── Scatter matrix ─────────────────────────────────────────────────────────────
+# ── Simple scatter (2 indicators) ────────────────────────────────────────────
+
+def make_scatter(
+    df_wide,
+    indicator_cols: list,
+    col_labels: list,
+    title: str,
+    subtitle: str = "",
+    source: str = "",
+) -> go.Figure:
+    """Plain scatter plot for exactly 2 indicators — country name on hover."""
+    x_col, y_col = indicator_cols
+    x_label, y_label = col_labels
+    df = df_wide.dropna(subset=indicator_cols).copy()
+
+    fig = px.scatter(
+        df,
+        x=x_col,
+        y=y_col,
+        hover_name="entity",
+        template=_TEMPLATE,
+        opacity=0.75,
+        labels={x_col: x_label, y_col: y_label},
+    )
+    fig.update_traces(
+        marker=dict(size=7, line=dict(width=0.5, color="rgba(255,255,255,0.6)"),
+                    color="#2563EB"),
+        hovertemplate="<b>%{hovertext}</b><br>"
+                      + x_label + ": %{x:,.2f}<br>"
+                      + y_label + ": %{y:,.2f}<extra></extra>",
+    )
+    fig.update_layout(
+        xaxis=dict(showgrid=True, gridcolor="#F1F5F9", zeroline=False),
+        yaxis=dict(showgrid=True, gridcolor="#F1F5F9", zeroline=False),
+        height=520,
+    )
+    _base_layout(fig, title, subtitle=subtitle, source=source)
+    return fig
+
+
+# ── Scatter matrix (3+ indicators) ────────────────────────────────────────────
 
 def make_scatter_matrix(
     df_wide,
@@ -293,6 +342,7 @@ def make_histogram(
     df,
     title: str,
     indicator: dict,
+    color_scale: str = "Blues",
     subtitle: str = "",
     source: str = "",
     xlabel: str = "",
@@ -302,6 +352,7 @@ def make_histogram(
     df = df.dropna(subset=["value"]).copy()
     unit_label = indicator["unit"]
     x_label = xlabel if xlabel else unit_label
+    fill_color = _scale_color(color_scale)
 
     fig = px.histogram(
         df,
@@ -314,7 +365,7 @@ def make_histogram(
     )
     fig.update_traces(
         hovertemplate="Range: %{x}<br>Countries: %{y}<extra></extra>",
-        marker_color="#2563EB",
+        marker_color=fill_color,
         selector=dict(type="histogram"),
     )
     fig.update_layout(
@@ -333,6 +384,7 @@ def make_box(
     df,
     title: str,
     indicator: dict,
+    color_scale: str = "Blues",
     subtitle: str = "",
     source: str = "",
     xlabel: str = "",
@@ -342,6 +394,7 @@ def make_box(
     df = df.dropna(subset=["value"]).copy()
     unit_label = indicator["unit"]
     y_label = ylabel if ylabel else unit_label
+    fill_color = _scale_color(color_scale)
 
     if df["year"].nunique() > 1:
         fig = px.box(
@@ -350,7 +403,7 @@ def make_box(
             template=_TEMPLATE,
             labels={"value": y_label, "year": xlabel if xlabel else "Year"},
             points=False,
-            color_discrete_sequence=["#2563EB"],
+            color_discrete_sequence=[fill_color],
         )
         fig.update_traces(
             hovertemplate="Year: %{x}<br>Median: %{median:.2f}<extra></extra>",
@@ -362,7 +415,7 @@ def make_box(
             template=_TEMPLATE,
             labels={"value": y_label},
             points="outliers",
-            color_discrete_sequence=["#2563EB"],
+            color_discrete_sequence=[fill_color],
         )
         fig.update_traces(
             hovertemplate="%{y:.2f}<extra></extra>",

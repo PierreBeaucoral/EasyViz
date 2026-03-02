@@ -14,7 +14,7 @@ from src.search import fuzzy_search
 from src.uploader import detect_columns, detect_format, normalise, read_uploaded_file
 from src.viz import (
     MAP_SCOPES, make_bar, make_box, make_corr_heatmap,
-    make_histogram, make_line, make_map, make_scatter_matrix,
+    make_histogram, make_line, make_map, make_scatter, make_scatter_matrix,
 )
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -575,6 +575,7 @@ def data_page():
                 hist_title = f"{chart_title} — distribution ({_period_label(bar_agg)})"
             fig = make_histogram(
                 hist_data, title=hist_title, indicator=indicator_t,
+                color_scale=color_scale,
                 subtitle=chart_subtitle, source=chart_source,
                 xlabel=x_label, ylabel=y_label,
             )
@@ -582,6 +583,7 @@ def data_page():
             fig = make_box(
                 filtered_t, title=f"{chart_title} — distribution",
                 indicator=indicator_t,
+                color_scale=color_scale,
                 subtitle=chart_subtitle, source=chart_source,
                 xlabel=x_label, ylabel=y_label,
             )
@@ -1130,14 +1132,24 @@ def compare_page():
                 "Each dot is a country. Axes show indicator values. "
                 "Look for clusters and patterns — no equation needed."
             )
-            fig1 = make_scatter_matrix(
-                merged,
-                indicator_cols=col_ids,
-                col_labels=short_labels,
-                title=f"Scatter matrix — {yr_label}",
-                subtitle=" · ".join(short_labels),
-                source="World Bank WDI",
-            )
+            if len(col_ids) == 2:
+                fig1 = make_scatter(
+                    merged,
+                    indicator_cols=col_ids,
+                    col_labels=short_labels,
+                    title=f"Scatter — {yr_label}",
+                    subtitle=" · ".join(short_labels),
+                    source="World Bank WDI",
+                )
+            else:
+                fig1 = make_scatter_matrix(
+                    merged,
+                    indicator_cols=col_ids,
+                    col_labels=short_labels,
+                    title=f"Scatter matrix — {yr_label}",
+                    subtitle=" · ".join(short_labels),
+                    source="World Bank WDI",
+                )
             st.plotly_chart(fig1, use_container_width=True)
 
         with tab2:
