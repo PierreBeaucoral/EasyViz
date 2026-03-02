@@ -8,11 +8,14 @@ import io
 import streamlit as st
 
 from src.catalog import INDICATORS
-from src.codegen import python_code, r_code
+from src.codegen import python_code, quarto_code, r_code
 from src.fetcher import fetch_data
 from src.search import fuzzy_search
 from src.uploader import detect_columns, detect_format, normalise, read_uploaded_file
-from src.viz import MAP_SCOPES, make_bar, make_line, make_map
+from src.viz import (
+    MAP_SCOPES, make_bar, make_box, make_corr_heatmap,
+    make_histogram, make_line, make_map, make_scatter_matrix,
+)
 
 # ── Page config ───────────────────────────────────────────────────────────────
 
@@ -80,10 +83,18 @@ DEFAULT_COUNTRIES = [
 
 # ── State ─────────────────────────────────────────────────────────────────────
 
+if "page" not in st.session_state:
+    # Restore from URL query params on first load
+    _qp = st.query_params
+    _ind_id = _qp.get("ind")
+    if _ind_id and any(r["id"] == _ind_id for r in INDICATORS):
+        st.session_state.selected_id = _ind_id
+        st.session_state.page = "data"
+    else:
+        st.session_state.selected_id = None
+        st.session_state.page = "home"  # "home" | "about" | "data" | "upload" | "compare"
 if "selected_id" not in st.session_state:
     st.session_state.selected_id = None
-if "page" not in st.session_state:
-    st.session_state.page = "home"  # "home" | "about" | "data"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -183,12 +194,16 @@ def home_page():
                             st.rerun()
 
         st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)
-        _, btn1, btn2, _ = st.columns([2, 1, 1, 2])
+        _, btn1, btn2, btn3, _ = st.columns([1, 1, 1, 1, 1])
         with btn1:
             if st.button("📤  Upload data", use_container_width=True):
                 st.session_state.page = "upload"
                 st.rerun()
         with btn2:
+            if st.button("🔗  Compare", use_container_width=True):
+                st.session_state.page = "compare"
+                st.rerun()
+        with btn3:
             if st.button("ℹ️  How it works", use_container_width=True):
                 st.session_state.page = "about"
                 st.rerun()
@@ -244,6 +259,10 @@ def data_page():
         if st.button("← New search", use_container_width=True):
             st.session_state.selected_id = None
             st.session_state.page = "home"
+            st.query_params.clear()
+            st.rerun()
+        if st.button("🔗 Compare indicators", use_container_width=True):
+            st.session_state.page = "compare"
             st.rerun()
 
         st.divider()
@@ -272,6 +291,7 @@ def data_page():
             )
             if selected_id != st.session_state.selected_id:
                 st.session_state.selected_id = selected_id
+                st.query_params["ind"] = selected_id
                 st.rerun()
 
         st.divider()
@@ -366,8 +386,22 @@ def data_page():
 
     with col_ctrl:
         is_cross_sectional = (year_min == year_max)
-        st.markdown('<div class="section-label">Chart type</div>', unsafe_allow_html=True)
-        _chart_opts = ["🗺️ World Map", "📊 Bar Chart"] if is_cross_sectional else ["🗺️ World Map", "📈 Line Chart", "📊 Bar Chart"]
+        st.markdown('<div class="section-label">What to show?</div>', unsafe_allow_html=True)
+        wizard = st.radio(
+            "wizard",
+            ["📍 Distribution", "📊 Ranking / Map", "📈 Trend over time"] if not is_cross_sectional
+            else ["📍 Distribution", "📊 Ranking / Map"],
+            label_visibility="collapsed",
+            horizontal=True,
+            key="chart_wizard",
+        )
+        st.markdown('<div class="section-label" style="margin-top:12px">Chart type</div>', unsafe_allow_html=True)
+        if "Distribution" in wizard:
+            _chart_opts = ["📊 Histogram", "📦 Box Plot"]
+        elif "Trend" in wizard:
+            _chart_opts = ["📈 Line Chart"]
+        else:
+            _chart_opts = ["🗺️ World Map", "📊 Bar Chart"]
         chart_type = st.radio(
             "chart_type",
             _chart_opts,
@@ -435,9 +469,9 @@ def data_page():
             else:
                 map_agg = st.selectbox("Aggregation", _AGG_OPTS, key="map_agg")
 
-        if "Bar" in chart_type:
+        if "Bar" in chart_type or "Histogram" in chart_type:
             bar_mode = st.radio(
-                "Bar period", ["Single year", "Aggregate over range"],
+                "Period", ["Single year", "Aggregate over range"],
                 horizontal=True, key="bar_mode",
             )
             if bar_mode == "Single year":
@@ -447,7 +481,8 @@ def data_page():
                 )
             else:
                 bar_agg = st.selectbox("Aggregation", _AGG_OPTS, key="bar_agg")
-            top_n = st.slider("Top N countries", 5, 50, 20)
+            if "Bar" in chart_type:
+                top_n = st.slider("Top N countries", 5, 50, 20)
 
     # ── Apply transform ───────────────────────────────────────────────────────
     def _apply_transform(data, t):
@@ -531,6 +566,25 @@ def data_page():
             )
         elif "Line" in chart_type:
             fig = make_line(filtered_t, title=chart_title, indicator=indicator_t, **shared_kw)
+        elif "Histogram" in chart_type:
+            if bar_mode == "Single year":
+                hist_data  = filtered_t[filtered_t["year"] == bar_year]
+                hist_title = f"{chart_title} — distribution ({bar_year})"
+            else:
+                hist_data  = _aggregate(filtered_t, bar_agg)
+                hist_title = f"{chart_title} — distribution ({_period_label(bar_agg)})"
+            fig = make_histogram(
+                hist_data, title=hist_title, indicator=indicator_t,
+                subtitle=chart_subtitle, source=chart_source,
+                xlabel=x_label, ylabel=y_label,
+            )
+        elif "Box" in chart_type:
+            fig = make_box(
+                filtered_t, title=f"{chart_title} — distribution",
+                indicator=indicator_t,
+                subtitle=chart_subtitle, source=chart_source,
+                xlabel=x_label, ylabel=y_label,
+            )
         else:
             if bar_mode == "Single year":
                 bar_data  = filtered_t[filtered_t["year"] == bar_year].sort_values("value", ascending=False)
@@ -600,7 +654,7 @@ def data_page():
                 color_scale=color_scale,
                 chart_title=chart_title,
             )
-            tab_py, tab_r = st.tabs(["🐍 Python", "📦 R"])
+            tab_py, tab_r, tab_qmd = st.tabs(["🐍 Python", "📦 R", "📄 Quarto"])
             with tab_py:
                 py_script = python_code(**_code_kw)
                 st.code(py_script, language="python")
@@ -614,6 +668,13 @@ def data_page():
                 st.download_button(
                     "⬇️ Download .R", r_script,
                     f"{indicator['id']}_chart.R", "text/plain",
+                )
+            with tab_qmd:
+                qmd_script = quarto_code(**_code_kw)
+                st.code(qmd_script, language="markdown")
+                st.download_button(
+                    "⬇️ Download .qmd", qmd_script,
+                    f"{indicator['id']}_chart.qmd", "text/plain",
                 )
 
     # ── Footer ────────────────────────────────────────────────────────────────
@@ -915,6 +976,208 @@ Instead of picking a single year, you can summarise across the whole selected pe
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# COMPARE PAGE
+# ══════════════════════════════════════════════════════════════════════════════
+
+def compare_page():
+    st.markdown("""
+    <style>
+    section[data-testid="stSidebar"]  { display: none !important; }
+    [data-testid="collapsedControl"]   { display: none !important; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    _, col, _ = st.columns([1, 4, 1])
+    with col:
+        if st.button("← Back to home"):
+            st.session_state.page = "home"
+            st.rerun()
+
+        st.markdown(
+            "<h1 style='font-size:2rem;margin-top:20px'>🔗 Compare indicators</h1>"
+            "<p style='color:#64748B'>Select 2–5 indicators to explore correlations "
+            "across countries — no equations, just patterns.</p>",
+            unsafe_allow_html=True,
+        )
+
+        # ── Indicator multiselect ──────────────────────────────────────────────
+        ind_by_name = {r["name"]: r for r in INDICATORS}
+        default_names = [
+            n for n in ["GDP per Capita, PPP (constant 2017 USD)", "Life Expectancy at Birth"]
+            if n in ind_by_name
+        ]
+        selected_names = st.multiselect(
+            "Choose 2–5 indicators to compare",
+            options=list(ind_by_name.keys()),
+            default=default_names,
+            max_selections=5,
+        )
+
+        if len(selected_names) < 2:
+            st.info("Pick at least 2 indicators to compare.")
+            return
+
+        selected_inds = [ind_by_name[n] for n in selected_names]
+
+        # ── Fetch data ─────────────────────────────────────────────────────────
+        dfs = {}
+        with st.spinner("Loading data…"):
+            for ind in selected_inds:
+                df_i = fetch_data(ind)
+                if df_i is not None and not df_i.empty:
+                    df_i = df_i[df_i["iso3"].notna() & (df_i["iso3"].str.len() == 3)]
+                    dfs[ind["id"]] = (df_i, ind)
+
+        if len(dfs) < 2:
+            st.error("Could not load enough data. Try different indicators.")
+            return
+
+        # ── Filters ────────────────────────────────────────────────────────────
+        all_years = sorted({
+            y for df_i, _ in dfs.values() for y in df_i["year"].unique() if y > 0
+        })
+
+        col_f1, col_f2 = st.columns([2, 1])
+        with col_f1:
+            all_countries = sorted({
+                c for df_i, _ in dfs.values() for c in df_i["entity"].unique()
+            })
+            default_sel = [c for c in DEFAULT_COUNTRIES if c in all_countries]
+            selected_countries = st.multiselect(
+                "Countries",
+                options=all_countries,
+                default=default_sel[:30],
+            )
+
+        # defaults so variables are always defined
+        year_mode = "Single year"
+        sel_year  = all_years[-1] if all_years else 0
+        yr_range  = (all_years[max(0, len(all_years) - 20)], all_years[-1]) if all_years else (0, 0)
+        yr_label  = str(sel_year)
+
+        with col_f2:
+            if all_years:
+                year_mode = st.radio(
+                    "Period", ["Single year", "Average over range"],
+                    horizontal=True,
+                )
+                if year_mode == "Single year":
+                    sel_year = st.selectbox("Year", sorted(all_years, reverse=True))
+                    yr_label = str(sel_year)
+                else:
+                    yr_range = st.select_slider(
+                        "Year range",
+                        options=all_years,
+                        value=(
+                            all_years[max(0, len(all_years) - 20)],
+                            all_years[-1],
+                        ),
+                    )
+                    yr_label = f"avg {yr_range[0]}–{yr_range[1]}"
+
+        # ── Build wide dataframe ───────────────────────────────────────────────
+        _countries = selected_countries if selected_countries else all_countries
+        col_ids, col_labels = [], []
+        merged = None
+
+        for ind_id, (df_i, ind) in dfs.items():
+            df_i = df_i[df_i["entity"].isin(_countries)].copy()
+            if year_mode == "Single year":
+                df_i = df_i[df_i["year"] == sel_year][["entity", "iso3", "value"]].copy()
+            else:
+                df_i = (
+                    df_i[df_i["year"].between(*yr_range)]
+                    .groupby(["entity", "iso3"], as_index=False)["value"]
+                    .mean()
+                )
+            df_i = df_i.rename(columns={"value": ind_id})
+            col_ids.append(ind_id)
+            col_labels.append(ind["name"])
+
+            if merged is None:
+                merged = df_i[["entity", "iso3", ind_id]]
+            else:
+                merged = merged.merge(
+                    df_i[["entity", "iso3", ind_id]], on=["entity", "iso3"], how="inner"
+                )
+
+        if merged is None or merged.empty:
+            st.warning("No data available for the selected combination.")
+            return
+
+        merged = merged.dropna(subset=col_ids, how="all")
+        n_complete = merged.dropna(subset=col_ids).shape[0]
+        st.caption(
+            f"{n_complete} countries with complete data across all indicators · {yr_label}"
+        )
+
+        if n_complete < 3:
+            st.warning(
+                "Too few countries with complete data. Try a different year or fewer indicators."
+            )
+            return
+
+        # ── Short labels for chart axes ────────────────────────────────────────
+        short_labels = [n[:28] + "…" if len(n) > 28 else n for n in col_labels]
+
+        # ── Three tabs: scatter matrix | heatmap | table ───────────────────────
+        tab1, tab2, tab3 = st.tabs(
+            ["📊 Scatter matrix", "🌡️ Correlation heatmap", "📋 Data table"]
+        )
+
+        with tab1:
+            st.caption(
+                "Each dot is a country. Axes show indicator values. "
+                "Look for clusters and patterns — no equation needed."
+            )
+            fig1 = make_scatter_matrix(
+                merged,
+                indicator_cols=col_ids,
+                col_labels=short_labels,
+                title=f"Scatter matrix — {yr_label}",
+                subtitle=" · ".join(short_labels),
+                source="World Bank WDI",
+            )
+            st.plotly_chart(fig1, use_container_width=True)
+
+        with tab2:
+            st.caption(
+                "Pearson r: +1 = perfect positive, –1 = perfect negative, 0 = no linear association."
+            )
+            fig2 = make_corr_heatmap(
+                merged,
+                indicator_cols=col_ids,
+                col_labels=short_labels,
+                title=f"Correlation matrix — {yr_label}",
+                subtitle=" · ".join(short_labels),
+                source="World Bank WDI",
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+
+        with tab3:
+            display_df = merged.rename(columns=dict(zip(col_ids, col_labels)))
+            display_df = display_df.sort_values(col_labels[0])
+            st.dataframe(
+                display_df[["entity"] + col_labels].rename(columns={"entity": "Country"}),
+                use_container_width=True,
+                height=420,
+            )
+            st.download_button(
+                "⬇️ Download data (CSV)",
+                display_df.to_csv(index=False),
+                "comparison.csv",
+                "text/csv",
+            )
+
+        st.markdown(
+            "<br><p style='text-align:center;color:#94A3B8;font-size:0.78rem'>"
+            "Data: <a href='https://data.worldbank.org' target='_blank'>World Bank WDI</a> · "
+            "Built with Streamlit + Plotly</p>",
+            unsafe_allow_html=True,
+        )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # ROUTER
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -922,6 +1185,8 @@ if st.session_state.page == "about":
     about_page()
 elif st.session_state.page == "upload":
     upload_page()
+elif st.session_state.page == "compare":
+    compare_page()
 elif st.session_state.selected_id is not None:
     st.session_state.page = "data"
     data_page()

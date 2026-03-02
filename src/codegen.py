@@ -331,3 +331,53 @@ fig
 '''
 
     return "\n".join([fetch_block, filter_block, log_block, viz_block])
+
+
+def quarto_code(
+    indicator: dict,
+    selected_countries: list,
+    year_range: tuple,
+    chart_type: str,
+    map_year: int | None,
+    bar_year: int | None,
+    top_n: int,
+    log_scale: bool,
+    color_scale: str,
+    chart_title: str,
+) -> str:
+    """Return a Quarto document (.qmd) that embeds the R chart code."""
+    r_script = r_code(
+        indicator=indicator,
+        selected_countries=selected_countries,
+        year_range=year_range,
+        chart_type=chart_type,
+        map_year=map_year,
+        bar_year=bar_year,
+        top_n=top_n,
+        log_scale=log_scale,
+        color_scale=color_scale,
+        chart_title=chart_title,
+    )
+    ind_name = indicator.get("name", "")
+    safe_title = chart_title.replace('"', '\\"')
+
+    header = f"""---
+title: "{safe_title}"
+format:
+  html:
+    self-contained: true
+    code-fold: true
+execute:
+  warning: false
+  message: false
+---
+
+## {ind_name}
+
+```{{r}}
+#| label: fig-chart
+#| fig-cap: "{safe_title}"
+#| fig-width: 10
+#| fig-height: 6
+"""
+    return header + r_script + "\n```\n"
