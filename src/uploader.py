@@ -15,20 +15,31 @@ import streamlit as st
 # ── File reading ───────────────────────────────────────────────────────────────
 
 def read_uploaded_file(uploaded_file) -> pd.DataFrame | None:
-    """Read CSV or XLSX/XLS from a Streamlit UploadedFile object."""
+    """Read CSV or XLSX/XLS from a Streamlit UploadedFile object.
+
+    Tries multiple separator / decimal combinations and returns whichever
+    produces the most numeric columns (handles both dot and comma decimals).
+    """
     name = uploaded_file.name.lower()
     raw = uploaded_file.read()
     try:
         if name.endswith(".csv"):
+            best: tuple[int, pd.DataFrame] | None = None
             for enc in ("utf-8", "latin-1", "cp1252"):
-                try:
-                    df = pd.read_csv(
-                        io.BytesIO(raw), sep=None, engine="python", encoding=enc
-                    )
-                    if df.shape[1] > 1:
-                        return df
-                except Exception:
-                    continue
+                for sep, decimal in [(None, "."), (";", ","), (",", ".")]:
+                    try:
+                        df = pd.read_csv(
+                            io.BytesIO(raw), sep=sep, decimal=decimal,
+                            engine="python", encoding=enc,
+                        )
+                        if df.shape[1] < 2:
+                            continue
+                        n_numeric = df.select_dtypes(include="number").shape[1]
+                        if best is None or n_numeric > best[0]:
+                            best = (n_numeric, df)
+                    except Exception:
+                        continue
+            return best[1] if best else None
         elif name.endswith((".xlsx", ".xls")):
             return pd.read_excel(io.BytesIO(raw))
     except Exception:

@@ -1087,7 +1087,30 @@ def subnational_page():
             return
 
         st.success(f"File read: **{df_raw.shape[0]:,}** rows × **{df_raw.shape[1]}** columns.")
-        with st.expander("Preview (first 10 rows)", expanded=True):
+
+        # ── Step 3b: Country filter (for multi-country files) ───────────────────
+        _country_kw = {"country", "pays", "nation", "countryname", "country_name"}
+        _country_col = next(
+            (c for c in df_raw.columns if c.lower().strip() in _country_kw), None
+        )
+        if _country_col:
+            available = sorted(df_raw[_country_col].dropna().unique().tolist())
+            # Pre-select the country chosen in step 1 if present
+            _preselect = country_obj.name if country_obj else None
+            _default_idx = (
+                available.index(_preselect)
+                if _preselect and _preselect in available
+                else 0
+            )
+            selected_country_filter = st.selectbox(
+                f"Filter by country (`{_country_col}` column detected)",
+                options=available,
+                index=_default_idx,
+            )
+            df_raw = df_raw[df_raw[_country_col] == selected_country_filter].copy()
+            st.caption(f"{len(df_raw):,} rows for **{selected_country_filter}**.")
+
+        with st.expander("Preview (first 10 rows)", expanded=False):
             st.dataframe(df_raw.head(10), width="stretch")
 
         # ── Step 4: Column mapping ──────────────────────────────────────────────
