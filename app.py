@@ -1065,8 +1065,9 @@ def subnational_page():
         # ── Step 3: Upload data ─────────────────────────────────────────────────
         st.markdown("### 3 · Upload your data")
         st.caption(
-            "Your CSV / Excel must have at least two columns: "
-            "**region name** and **value**. An optional **year** column is supported."
+            f"Your CSV / Excel needs at least two columns: "
+            f"an **ADM{level} name** column (just the region name, e.g. `Kano` or `Seine-et-Marne`) "
+            f"and a **value** column. An optional **year** column is also supported."
         )
 
         uploaded = st.file_uploader(
@@ -1091,11 +1092,29 @@ def subnational_page():
 
         # ── Step 4: Column mapping ──────────────────────────────────────────────
         st.markdown("### 4 · Map columns")
+        st.caption(
+            f"The **region column** should contain ADM{level} names "
+            "(e.g. `Kano`, `Île-de-France`, `Bavaria`). "
+            "Fuzzy matching handles spelling variations automatically."
+        )
         all_cols = list(df_raw.columns)
+
+        # Auto-detect the most likely region column by name
+        _region_keywords = {"adm1", "adm2", "adm3", "region", "district",
+                            "province", "state", "county", "municipality",
+                            "department", "zone", "area", "name"}
+        _auto_region = next(
+            (c for c in all_cols if c.lower().strip() in _region_keywords),
+            all_cols[0],
+        )
 
         col_r, col_v, col_y = st.columns(3)
         with col_r:
-            region_col = st.selectbox("Region column", all_cols, index=0)
+            region_col = st.selectbox(
+                f"ADM{level} name column",
+                all_cols,
+                index=all_cols.index(_auto_region),
+            )
         with col_v:
             val_options = [c for c in all_cols if c != region_col]
             value_col = st.selectbox("Value column", val_options, index=0)
