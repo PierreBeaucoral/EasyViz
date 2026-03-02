@@ -802,13 +802,14 @@ def about_page():
         st.markdown("## How to use it")
         steps = [
             ("🔍", "Search", "Type any topic on the home page — *child mortality*, *GDP*, *CO₂*, *poverty*. Results are ranked by relevance."),
-            ("📊", "Pick a chart", "Choose between a **World Map**, a **Line Chart** (countries over time), or a **Bar Chart** (country ranking for a given period)."),
+            ("📤", "Or upload your own data", "Click **Upload data** to bring a CSV or Excel file. The app detects the structure automatically (long vs wide format, country and year columns). Cross-sectional data (no year column) is also supported."),
+            ("📊", "Pick a chart", "Choose between a **World Map**, a **Line Chart** (countries over time), or a **Bar Chart** (country ranking for a given period). Line charts are hidden for cross-sectional data."),
             ("🌍", "Select countries & years", "Use the multiselect to choose which countries appear in Line and Bar charts. The year range slider filters all charts."),
             ("⚙️", "Customise", "Edit the title, add a subtitle, change the colour palette, toggle log scale, or relabel the axes."),
             ("🔄", "Transform", "Apply transformations to your data before plotting: normalise to % of max, compute % change vs first year, cumulative sum, rolling average, or rank."),
             ("📅", "Aggregate over periods", "For maps and bar charts, instead of picking a single year you can aggregate the whole selected period using mean, sum, median, min, or max."),
             ("⬇️", "Download", "Export the underlying data as **CSV**, the chart as **PNG**, **SVG** (vector, ideal for papers), or **HTML** (interactive, embeddable)."),
-            ("👩‍💻", "Get the code", "Every chart comes with a ready-to-run **Python** and **R** script — open the *Reproduce this chart* panel at the bottom."),
+            ("👩‍💻", "Get the code", "Every built-in indicator comes with a ready-to-run **Python** and **R** script — open the *Reproduce this chart* panel at the bottom."),
         ]
         for icon, title, desc in steps:
             st.markdown(
@@ -840,20 +841,43 @@ def about_page():
         # ── Data sources ─────────────────────────────────────────────────────
         st.markdown("## Data sources")
         st.markdown("""
-All indicators come from the **World Bank World Development Indicators (WDI)** —
+All built-in indicators come from the **World Bank World Development Indicators (WDI)** —
 the most comprehensive cross-country development database, updated annually.
 
 | Source | Coverage | Access |
 |---|---|---|
 | World Bank WDI | ~220 countries · 1960–2024 | Free, open API |
+| Your own file | Any country · any year | CSV or Excel upload |
 
 Data is fetched live on first use and cached for **1 hour** to keep the app responsive.
         """)
 
         st.divider()
 
-        # ── Transforms reference ──────────────────────────────────────────────
-        st.markdown("## Data transforms")
+        # ── Upload reference ──────────────────────────────────────────────────
+        st.markdown("## Uploading your own data")
+        st.markdown("""
+Click **Upload data** on the home page to bring any CSV or Excel file. The app handles most real-world structures automatically.
+
+**Supported formats**
+
+| Format | Description | Example |
+|---|---|---|
+| **Long** | One row per country × year | `country, year, value` |
+| **Wide** | One row per country, years as column headers | `country, 2000, 2001, …` |
+| **Cross-sectional** | One row per country, no year column | `country, value` |
+
+**Column mapping** is detected automatically but can be overridden. You can also tick *"Country column already contains ISO3 codes"* to skip name resolution entirely.
+
+**Country name resolution** works in four steps, in order:
+
+1. **ISO3 exact** — `FRA`, `NGA`, `USA` are used directly.
+2. **ISO2 exact** — `FR`, `NG`, `US` are converted to ISO3.
+3. **Normalised exact match** — accents, commas, and punctuation are stripped before matching, so `"Côte d'Ivoire"`, `"Korea, Rep."`, `"Lao PDR"` and `"Congo, Dem. Rep."` all resolve correctly.
+4. **Fuzzy match** — remaining names are matched against the full country name database with a similarity threshold, catching typos and alternate spellings.
+
+Countries that cannot be resolved are kept in Line and Bar charts but will be invisible on the map (no ISO3 code to place them).
+        """)
         st.markdown("""
 Available under *Transform data* in the Customise panel. Applied before plotting to Line and Bar charts.
 

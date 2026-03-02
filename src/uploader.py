@@ -6,6 +6,8 @@ for user-supplied CSV / XLSX datasets.
 from __future__ import annotations
 
 import io
+import re
+import unicodedata
 
 import pandas as pd
 import streamlit as st
@@ -18,7 +20,6 @@ def read_uploaded_file(uploaded_file) -> pd.DataFrame | None:
     raw = uploaded_file.read()
     try:
         if name.endswith(".csv"):
-            # Try Python engine with sep=None for auto-detection (comma, semicolon, tab, pipe)
             for enc in ("utf-8", "latin-1", "cp1252"):
                 try:
                     df = pd.read_csv(
@@ -60,7 +61,6 @@ def detect_columns(df: pd.DataFrame) -> dict:
     year_col = next(
         (c for c in cols if any(k in str(c).lower() for k in _year_kw)), None
     )
-    # Fallback: an integer column whose values look like years
     if year_col is None:
         for c in cols:
             try:
@@ -84,39 +84,188 @@ def detect_columns(df: pd.DataFrame) -> dict:
 
 # ── ISO3 resolution ────────────────────────────────────────────────────────────
 
-@st.cache_data(show_spinner=False)
-def _build_iso3_map(entities: tuple[str, ...]) -> dict[str, str]:
-    """Map entity strings → ISO3 codes. Tries pycountry fuzzy search."""
-    result: dict[str, str] = {}
+def _norm(s: str) -> str:
+    """Lowercase, strip accents, collapse punctuation/whitespace."""
+    s = unicodedata.normalize("NFD", s.lower().strip())
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")   # drop combining chars
+    s = re.sub(r"[,\.'\"\-\(\)]", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+# Curated aliases that pycountry gets wrong or is slow on.
+# Keys are already _norm()-ed; values are ISO3.
+_ALIASES: dict[str, str] = {
+    # World Bank / IMF comma-style names
+    "korea rep":                  "KOR",
+    "korea rep.":                 "KOR",
+    "south korea":                "KOR",
+    "korea dem peoples rep":      "PRK",
+    "north korea":                "PRK",
+    "congo dem rep":              "COD",
+    "congo democratic republic":  "COD",
+    "dr congo":                   "COD",
+    "drc":                        "COD",
+    "democratic republic of congo": "COD",
+    "democratic republic of the congo": "COD",
+    "congo rep":                  "COG",
+    "republic of the congo":      "COG",
+    "egypt arab rep":             "EGY",
+    "iran islamic rep":           "IRN",
+    "venezuela rb":               "VEN",
+    "kyrgyz republic":            "KGZ",
+    "kyrgyzstan":                 "KGZ",
+    "slovak republic":            "SVK",
+    "czech republic":             "CZE",
+    "czechia":                    "CZE",
+    "bahamas the":                "BHS",
+    "the bahamas":                "BHS",
+    "gambia the":                 "GMB",
+    "the gambia":                 "GMB",
+    "yemen rep":                  "YEM",
+    "micronesia fed sts":         "FSM",
+    "micronesia":                 "FSM",
+    "federated states of micronesia": "FSM",
+    "sao tome and principe":      "STP",
+    "sao tome":                   "STP",
+    "timor leste":                "TLS",
+    "east timor":                 "TLS",
+    "cabo verde":                 "CPV",
+    "cape verde":                 "CPV",
+    "eswatini":                   "SWZ",
+    "swaziland":                  "SWZ",
+    "north macedonia":            "MKD",
+    "fyr macedonia":              "MKD",
+    "republic of north macedonia": "MKD",
+    "cote d ivoire":              "CIV",
+    "ivory coast":                "CIV",
+    "lao pdr":                    "LAO",
+    "laos":                       "LAO",
+    "lao peoples democratic republic": "LAO",
+    "russia":                     "RUS",
+    "russian federation":         "RUS",
+    "syria":                      "SYR",
+    "syrian arab republic":       "SYR",
+    "bolivia":                    "BOL",
+    "tanzania":                   "TZA",
+    "united republic of tanzania": "TZA",
+    "vietnam":                    "VNM",
+    "viet nam":                   "VNM",
+    "moldova":                    "MDA",
+    "republic of moldova":        "MDA",
+    "taiwan":                     "TWN",
+    "taiwan china":               "TWN",
+    "hong kong":                  "HKG",
+    "hong kong sar china":        "HKG",
+    "macao":                      "MAC",
+    "macau":                      "MAC",
+    "macao sar china":            "MAC",
+    "usa":                        "USA",
+    "united states":              "USA",
+    "united states of america":   "USA",
+    "uk":                         "GBR",
+    "great britain":              "GBR",
+    "england":                    "GBR",
+    "turkiye":                    "TUR",
+    "turkey":                     "TUR",
+    "west bank and gaza":         "PSE",
+    "palestine":                  "PSE",
+    "palestinian territories":    "PSE",
+    "kosovo":                     "XKX",
+    "sint maarten dutch part":    "SXM",
+    "curacao":                    "CUW",
+    "brunei":                     "BRN",
+    "brunei darussalam":          "BRN",
+    "burma":                      "MMR",
+    "myanmar":                    "MMR",
+}
+
+
+def _build_pycountry_lookup() -> dict[str, str]:
+    """Build a normalised name → ISO3 dict from all pycountry entries."""
     try:
         import pycountry
-
-        for name in entities:
-            s = str(name).strip()
-            # Already ISO3?
-            if len(s) == 3 and s.upper() == s:
-                result[name] = s
-                continue
-            # Already ISO2?
-            if len(s) == 2 and s.upper() == s:
-                try:
-                    c = pycountry.countries.get(alpha_2=s.upper())
-                    result[name] = c.alpha_3 if c else ""
-                    continue
-                except Exception:
-                    pass
-            # Fuzzy name match
-            try:
-                hits = pycountry.countries.search_fuzzy(s)
-                result[name] = hits[0].alpha_3 if hits else ""
-            except Exception:
-                result[name] = ""
     except ImportError:
-        # pycountry not available — leave ISO3 empty; maps still show data
-        # if user's data already has ISO3 codes in the entity column
-        for name in entities:
-            s = str(name).strip()
-            result[name] = s if (len(s) == 3 and s.upper() == s) else ""
+        return {}
+    lookup: dict[str, str] = {}
+    for c in pycountry.countries:
+        iso3 = c.alpha_3
+        for attr in ("name", "official_name", "common_name"):
+            val = getattr(c, attr, None)
+            if val:
+                lookup[_norm(val)] = iso3
+        # alpha_2 and alpha_3 exact (uppercase) — handle separately in main fn
+    return lookup
+
+
+# Built once per Python process; cheap after first call.
+_PYCOUNTRY_LOOKUP: dict[str, str] | None = None
+
+
+def _get_lookup() -> dict[str, str]:
+    global _PYCOUNTRY_LOOKUP
+    if _PYCOUNTRY_LOOKUP is None:
+        _PYCOUNTRY_LOOKUP = {**_build_pycountry_lookup(), **_ALIASES}
+    return _PYCOUNTRY_LOOKUP
+
+
+@st.cache_data(show_spinner=False)
+def _build_iso3_map(entities: tuple[str, ...]) -> dict[str, str]:
+    """
+    Map entity strings → ISO3 codes.
+
+    Resolution order:
+      1. Already ISO3 (3 uppercase letters)
+      2. ISO2 → ISO3 via pycountry
+      3. Normalised exact match in lookup table (pycountry names + curated aliases)
+      4. rapidfuzz token-sort ratio against the lookup table (score ≥ 80)
+      5. Empty string (country won't appear on choropleth)
+    """
+    from rapidfuzz import process, fuzz
+
+    lookup = _get_lookup()
+    lookup_keys = list(lookup.keys())
+
+    try:
+        import pycountry
+        _iso3_set = {c.alpha_3 for c in pycountry.countries}
+        _iso2_map = {c.alpha_2: c.alpha_3 for c in pycountry.countries}
+    except ImportError:
+        _iso3_set = set()
+        _iso2_map = {}
+
+    result: dict[str, str] = {}
+
+    for name in entities:
+        s = str(name).strip()
+
+        # 1. Already a valid ISO3
+        su = s.upper()
+        if len(s) == 3 and su == s and su in _iso3_set:
+            result[name] = su
+            continue
+
+        # 2. ISO2
+        if len(s) == 2 and su == s and su in _iso2_map:
+            result[name] = _iso2_map[su]
+            continue
+
+        # 3. Normalised exact match
+        norm = _norm(s)
+        if norm in lookup:
+            result[name] = lookup[norm]
+            continue
+
+        # 4. Fuzzy match (rapidfuzz token_sort_ratio — handles "Korea, Rep." style)
+        if lookup_keys:
+            match, score, _ = process.extractOne(
+                norm, lookup_keys, scorer=fuzz.token_sort_ratio
+            )
+            if score >= 80:
+                result[name] = lookup[match]
+                continue
+
+        result[name] = ""
+
     return result
 
 
@@ -141,9 +290,8 @@ def normalise(
             c for c in df.columns
             if str(c).strip().isdigit() and 1900 <= int(str(c).strip()) <= 2030
         ]
-        id_cols = [entity_col]
         df = df.melt(
-            id_vars=id_cols,
+            id_vars=[entity_col],
             value_vars=year_value_cols,
             var_name="_year",
             value_name="value",
@@ -161,12 +309,11 @@ def normalise(
         if year_col:
             df["year"] = pd.to_numeric(df["year"], errors="coerce")
         else:
-            df["year"] = 0          # single-period data
+            df["year"] = 0
         df["value"] = pd.to_numeric(df["value"], errors="coerce")
 
     df = df.dropna(subset=["value"]).reset_index(drop=True)
 
-    # ISO3 resolution
     if entity_is_iso3:
         df["iso3"] = df["entity"].str.strip().str.upper()
     else:
