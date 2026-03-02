@@ -11,7 +11,7 @@ from src.catalog import INDICATORS
 from src.codegen import python_code, r_code
 from src.fetcher import fetch_data
 from src.search import fuzzy_search
-from src.viz import make_bar, make_line, make_map
+from src.viz import MAP_SCOPES, make_bar, make_line, make_map
 
 # ── Page config ───────────────────────────────────────────────────────────────
 
@@ -362,15 +362,17 @@ def data_page():
 
         # Always-defined vars (widgets shown conditionally)
         _AGG_OPTS = ["Mean", "Sum", "Median", "Min", "Max"]
-        map_year    = year_range[1]
-        map_mode    = "Single year"
-        map_agg     = "Mean"
-        bar_year    = year_range[1]
-        bar_mode    = "Single year"
-        bar_agg     = "Mean"
-        top_n       = 20
+        map_year       = year_range[1]
+        map_mode       = "Single year"
+        map_agg        = "Mean"
+        map_scope_label = "🌍 World"
+        bar_year       = year_range[1]
+        bar_mode       = "Single year"
+        bar_agg        = "Mean"
+        top_n          = 20
 
         if "Map" in chart_type:
+            map_scope_label = st.selectbox("Region", list(MAP_SCOPES.keys()), key="map_scope")
             map_mode = st.radio(
                 "Map period", ["Single year", "Aggregate over range"],
                 horizontal=True, key="map_mode",
@@ -461,8 +463,8 @@ def data_page():
 
         if "Map" in chart_type:
             if map_mode == "Single year":
-                map_data   = df[df["year"] == map_year]
-                map_title  = chart_title
+                map_data  = df[df["year"] == map_year]
+                map_title = chart_title
             else:
                 map_data  = _aggregate(df[df["year"].between(*year_range)], map_agg)
                 map_title = f"{chart_title} ({_period_label(map_agg)})"
@@ -474,6 +476,7 @@ def data_page():
                 log_scale=log_scale,
                 subtitle=chart_subtitle,
                 source=chart_source,
+                scope=MAP_SCOPES[map_scope_label],
             )
         elif "Line" in chart_type:
             fig = make_line(filtered_t, title=chart_title, indicator=indicator_t, **shared_kw)

@@ -57,6 +57,18 @@ def _base_layout(
 
 # ── World map ──────────────────────────────────────────────────────────────────
 
+# Plotly scope strings mapped from display names
+MAP_SCOPES = {
+    "🌍 World":         "world",
+    "🌍 Africa":        "africa",
+    "🌏 Asia":          "asia",
+    "🌎 North America": "north america",
+    "🌎 South America": "south america",
+    "🌍 Europe":        "europe",
+    "🌊 Oceania":       "world",   # Plotly has no oceania scope; zoom via geo center instead
+}
+
+
 def make_map(
     df,
     title: str,
@@ -65,6 +77,7 @@ def make_map(
     log_scale: bool = False,
     subtitle: str = "",
     source: str = "",
+    scope: str = "world",
 ) -> go.Figure:
     df = df.dropna(subset=["value", "iso3"])
     df = df[df["iso3"].str.len() == 3].copy()
@@ -74,13 +87,17 @@ def make_map(
         df, suffix = _apply_log(df)
         unit_label = f"{unit_label} {suffix}"
 
+    # Natural earth looks good for world; use equirectangular for regions
+    projection = "natural earth" if scope == "world" else "equirectangular"
+
     fig = px.choropleth(
         df,
         locations="iso3",
         color="value",
         hover_name="entity",
         color_continuous_scale=color_scale,
-        projection="natural earth",
+        projection=projection,
+        scope=scope,
         labels={"value": unit_label},
         template=_TEMPLATE,
     )
