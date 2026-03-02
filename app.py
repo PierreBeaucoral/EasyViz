@@ -323,7 +323,8 @@ def data_page():
     m1.metric("Source", src_label)
     m2.metric("Unit", indicator["unit"])
     m3.metric("Countries", df["entity"].nunique())
-    m4.metric("Year range", f"{int(df['year'].min())} – {int(df['year'].max())}")
+    _yr_min, _yr_max = int(df["year"].min()), int(df["year"].max())
+    m4.metric("Year range", "Cross-sectional" if _yr_min == _yr_max == 0 else f"{_yr_min} – {_yr_max}")
     st.divider()
 
     # ── Filters ───────────────────────────────────────────────────────────────
@@ -339,11 +340,18 @@ def data_page():
             default=default_sel[:15],
         )
     with col_y:
-        year_range = st.slider(
-            "Year range",
-            min_value=year_min, max_value=year_max,
-            value=(max(year_min, year_max - 20), year_max),
-        )
+        if year_min < year_max:
+            year_range = st.slider(
+                "Year range",
+                min_value=year_min, max_value=year_max,
+                value=(max(year_min, year_max - 20), year_max),
+            )
+        else:
+            year_range = (year_min, year_max)
+            if year_min == 0:
+                st.caption("No year column — cross-sectional data")
+            else:
+                st.caption(f"Year: **{year_min}**")
 
     _countries = selected_countries if selected_countries else all_countries
     filtered = df[
@@ -357,10 +365,12 @@ def data_page():
     col_ctrl, col_chart = st.columns([1, 3])
 
     with col_ctrl:
+        is_cross_sectional = (year_min == year_max)
         st.markdown('<div class="section-label">Chart type</div>', unsafe_allow_html=True)
+        _chart_opts = ["🗺️ World Map", "📊 Bar Chart"] if is_cross_sectional else ["🗺️ World Map", "📈 Line Chart", "📊 Bar Chart"]
         chart_type = st.radio(
             "chart_type",
-            ["🗺️ World Map", "📈 Line Chart", "📊 Bar Chart"],
+            _chart_opts,
             label_visibility="collapsed",
         )
 
