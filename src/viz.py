@@ -428,3 +428,51 @@ def make_box(
     )
     _base_layout(fig, title, subtitle=subtitle, source=source)
     return fig
+
+
+# ── Sub-national admin choropleth ─────────────────────────────────────────────
+
+def make_admin_map(
+    df,
+    geojson: dict,
+    title: str,
+    color_scale: str = "Blues",
+    unit: str = "value",
+    log_scale: bool = False,
+    subtitle: str = "",
+    source: str = "",
+) -> go.Figure:
+    """Choropleth at admin (ADM1/ADM2) level using a geoBoundaries GeoJSON.
+
+    df must have columns: region (str, matches shapeName), value (float).
+    """
+    df = df.dropna(subset=["value", "region"]).copy()
+    if log_scale:
+        df, suffix = _apply_log(df)
+        unit = f"{unit} {suffix}"
+
+    fig = px.choropleth(
+        df,
+        geojson=geojson,
+        featureidkey="properties.shapeName",
+        locations="region",
+        color="value",
+        color_continuous_scale=color_scale,
+        labels={"value": unit},
+        template=_TEMPLATE,
+        hover_name="region",
+    )
+    fig.update_traces(
+        hovertemplate="<b>%{hovertext}</b><br>" + unit + ": %{z:,.2f}<extra></extra>",
+    )
+    fig.update_geos(fitbounds="locations", visible=False)
+    fig.update_layout(
+        coloraxis_colorbar=dict(
+            title=dict(text=unit, font=dict(size=12)),
+            thickness=14, len=0.6, tickfont=dict(size=11),
+        ),
+        margin=dict(t=70, b=20, l=0, r=0),
+        height=580,
+    )
+    _base_layout(fig, title, subtitle=subtitle, source=source)
+    return fig

@@ -10,10 +10,11 @@ import streamlit as st
 from src.catalog import INDICATORS
 from src.codegen import python_code, quarto_code, r_code
 from src.fetcher import fetch_data
+from src.geo import fetch_admin_geojson, get_region_names, match_regions
 from src.search import fuzzy_search
 from src.uploader import detect_columns, detect_format, normalise, read_uploaded_file
 from src.viz import (
-    MAP_SCOPES, make_bar, make_box, make_corr_heatmap,
+    MAP_SCOPES, make_admin_map, make_bar, make_box, make_corr_heatmap,
     make_histogram, make_line, make_map, make_scatter, make_scatter_matrix,
 )
 
@@ -194,7 +195,7 @@ def home_page():
                             st.rerun()
 
         st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)
-        _, btn1, btn2, btn3, _ = st.columns([1, 1, 1, 1, 1])
+        btn1, btn2, btn3, btn4 = st.columns(4)
         with btn1:
             if st.button("📤  Upload data", use_container_width=True):
                 st.session_state.page = "upload"
@@ -204,6 +205,10 @@ def home_page():
                 st.session_state.page = "compare"
                 st.rerun()
         with btn3:
+            if st.button("🗺️  Sub-national", use_container_width=True):
+                st.session_state.page = "subnational"
+                st.rerun()
+        with btn4:
             if st.button("ℹ️  How it works", use_container_width=True):
                 st.session_state.page = "about"
                 st.rerun()
@@ -978,6 +983,249 @@ Instead of picking a single year, you can summarise across the whole selected pe
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# SUB-NATIONAL PAGE
+# ══════════════════════════════════════════════════════════════════════════════
+
+def subnational_page():
+    import pycountry  # lazy — not available in all dev envs but present on deploy
+
+    st.markdown("""
+    <style>
+    section[data-testid="stSidebar"]  { display: none !important; }
+    [data-testid="collapsedControl"]   { display: none !important; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    _, col, _ = st.columns([1, 4, 1])
+    with col:
+        if st.button("← Back to home"):
+            st.session_state.page = "home"
+            st.rerun()
+
+        st.markdown(
+            "<h1 style='font-size:2rem;margin-top:20px'>🗺️ Sub-national Map</h1>"
+            "<p style='color:#64748B'>Map any indicator at province / state / district level. "
+            "Upload your data and the app fetches boundaries automatically.</p>",
+            unsafe_allow_html=True,
+        )
+
+        # ── Step 1: Country & admin level ──────────────────────────────────────
+        st.markdown("### 1 · Select country and admin level")
+        col_a, col_b = st.columns(2)
+
+        with col_a:
+            country_query = st.text_input(
+                "Country name",
+                placeholder="e.g. France, Nigeria, Brazil…",
+            )
+            country_obj = None
+            iso3 = None
+            if country_query:
+                # Try exact match first, then fuzzy via pycountry
+                try:
+                    country_obj = pycountry.countries.search_fuzzy(country_query)[0]
+                    iso3 = country_obj.alpha_3
+                    st.success(f"**{country_obj.name}** — ISO3: `{iso3}`")
+                except Exception:
+                    st.error("Country not found. Try a different spelling.")
+
+        with col_b:
+            adm_level = st.radio(
+                "Admin level",
+                ["ADM1 — State / Province / Region", "ADM2 — District / County"],
+                horizontal=False,
+            )
+            level = 1 if "ADM1" in adm_level else 2
+
+        if not iso3:
+            st.info("Enter a country name to continue.")
+            return
+
+        # ── Step 2: Fetch boundaries ────────────────────────────────────────────
+        st.markdown("### 2 · Fetch boundaries")
+        with st.spinner(f"Downloading ADM{level} boundaries for **{country_obj.name}**…"):
+            geojson = fetch_admin_geojson(iso3, level)
+
+        if geojson is None:
+            st.error(
+                f"Could not download boundaries for **{country_obj.name}** ADM{level}. "
+                "This country or level may not be available in geoBoundaries. "
+                "Try ADM1 instead, or a different country."
+            )
+            return
+
+        geojson_names = get_region_names(geojson)
+        n_regions = len(geojson_names)
+        st.success(f"**{n_regions}** regions found.")
+
+        with st.expander(f"Available region names ({n_regions})", expanded=False):
+            st.write(", ".join(geojson_names))
+
+        # ── Step 3: Upload data ─────────────────────────────────────────────────
+        st.markdown("### 3 · Upload your data")
+        st.caption(
+            "Your CSV / Excel must have at least two columns: "
+            "**region name** and **value**. An optional **year** column is supported."
+        )
+
+        uploaded = st.file_uploader(
+            "Drop your file here",
+            type=["csv", "xlsx", "xls"],
+            key="subnational_upload",
+            label_visibility="collapsed",
+        )
+        if not uploaded:
+            st.info("Accepted formats: **CSV** · **XLSX / XLS**")
+            return
+
+        from src.uploader import read_uploaded_file as _read
+        df_raw = _read(uploaded)
+        if df_raw is None or df_raw.empty:
+            st.error("Could not read the file.")
+            return
+
+        st.success(f"File read: **{df_raw.shape[0]:,}** rows × **{df_raw.shape[1]}** columns.")
+        with st.expander("Preview (first 10 rows)", expanded=True):
+            st.dataframe(df_raw.head(10), use_container_width=True)
+
+        # ── Step 4: Column mapping ──────────────────────────────────────────────
+        st.markdown("### 4 · Map columns")
+        all_cols = list(df_raw.columns)
+
+        col_r, col_v, col_y = st.columns(3)
+        with col_r:
+            region_col = st.selectbox("Region column", all_cols, index=0)
+        with col_v:
+            val_options = [c for c in all_cols if c != region_col]
+            value_col = st.selectbox("Value column", val_options, index=0)
+        with col_y:
+            year_options = ["(none)"] + [c for c in all_cols if c not in (region_col, value_col)]
+            year_col_sel = st.selectbox("Year column (optional)", year_options)
+            year_col = None if year_col_sel == "(none)" else year_col_sel
+
+        # ── Step 5: Year filter ─────────────────────────────────────────────────
+        sel_year = None
+        if year_col:
+            years = sorted(df_raw[year_col].dropna().unique().tolist())
+            if years:
+                sel_year = st.select_slider(
+                    "Select year to display",
+                    options=years,
+                    value=years[-1],
+                )
+
+        # ── Step 6: Indicator metadata ──────────────────────────────────────────
+        st.markdown("### 5 · Chart settings")
+        col_m1, col_m2 = st.columns(2)
+        with col_m1:
+            ind_name  = st.text_input("Indicator name", value=uploaded.name.rsplit(".", 1)[0])
+            ind_unit  = st.text_input("Unit", placeholder="e.g. % of population")
+        with col_m2:
+            color_scale = st.selectbox(
+                "Color palette",
+                ["Blues", "Viridis", "RdYlGn", "Plasma", "YlOrRd",
+                 "Oranges", "Greens", "Cividis", "Turbo", "Reds"],
+            )
+            log_scale = st.checkbox("Logarithmic scale")
+
+        # ── Step 7: Build & display ─────────────────────────────────────────────
+        if not st.button("📊  Build map", type="primary", use_container_width=True):
+            return
+
+        # Prepare data
+        df_work = df_raw[[region_col, value_col]].copy()
+        df_work.columns = ["region", "value"]
+        df_work["value"] = pd.to_numeric(df_work["value"], errors="coerce")
+
+        if year_col and sel_year is not None:
+            mask = df_raw[year_col] == sel_year
+            df_work = df_work[mask.values]
+
+        df_work = df_work.dropna(subset=["value"])
+
+        # Fuzzy match regions
+        user_regions = df_work["region"].unique().tolist()
+        with st.spinner("Matching region names…"):
+            mapping = match_regions(user_regions, geojson_names)
+
+        matched   = {k: v for k, v in mapping.items() if v is not None}
+        unmatched = [k for k, v in mapping.items() if v is None]
+
+        if unmatched:
+            st.warning(
+                f"**{len(unmatched)}** region(s) could not be matched and will be excluded: "
+                + ", ".join(f"`{u}`" for u in unmatched[:10])
+                + ("…" if len(unmatched) > 10 else "")
+            )
+
+        df_work["region"] = df_work["region"].map(matched)
+        df_work = df_work.dropna(subset=["region"])
+
+        if df_work.empty:
+            st.error("No regions matched. Check that region names in your file match the country's admin units.")
+            return
+
+        n_matched = df_work["region"].nunique()
+        st.caption(
+            f"Showing **{n_matched}** of {n_regions} regions · "
+            + (f"Year: **{sel_year}**" if sel_year else "all years aggregated")
+        )
+
+        title_str = ind_name or "Sub-national Map"
+        if sel_year:
+            title_str += f" ({sel_year})"
+
+        fig = make_admin_map(
+            df_work,
+            geojson=geojson,
+            title=title_str,
+            color_scale=color_scale,
+            unit=ind_unit or "value",
+            log_scale=log_scale,
+            subtitle=country_obj.name,
+            source=uploaded.name,
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Downloads
+        st.divider()
+        dl1, dl2, dl3 = st.columns(3)
+        with dl1:
+            st.download_button(
+                "⬇️ Data (CSV)",
+                df_work.to_csv(index=False),
+                "subnational_data.csv", "text/csv",
+                use_container_width=True,
+            )
+        with dl2:
+            try:
+                import io as _io
+                buf = _io.BytesIO()
+                fig.write_image(buf, format="png", scale=2, width=1400, height=800)
+                st.download_button(
+                    "⬇️ Chart (PNG)", buf.getvalue(),
+                    "subnational_map.png", "image/png",
+                    use_container_width=True,
+                )
+            except Exception:
+                st.button("⬇️ PNG (needs kaleido)", disabled=True, use_container_width=True)
+        with dl3:
+            st.download_button(
+                "⬇️ Chart (HTML)",
+                fig.to_html(full_html=True, include_plotlyjs="cdn"),
+                "subnational_map.html", "text/html",
+                use_container_width=True,
+            )
+
+        st.markdown(
+            "<br><p style='text-align:center;color:#94A3B8;font-size:0.78rem'>"
+            "Boundaries: <a href='https://www.geoboundaries.org' target='_blank'>geoBoundaries</a> · "
+            "Built with Streamlit + Plotly</p>",
+            unsafe_allow_html=True,
+        )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # COMPARE PAGE
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1199,6 +1447,8 @@ elif st.session_state.page == "upload":
     upload_page()
 elif st.session_state.page == "compare":
     compare_page()
+elif st.session_state.page == "subnational":
+    subnational_page()
 elif st.session_state.selected_id is not None:
     st.session_state.page = "data"
     data_page()
