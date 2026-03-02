@@ -5,6 +5,7 @@ Landing page + data explorer with OWID and World Bank data.
 
 import io
 
+import pandas as pd
 import streamlit as st
 
 from src.catalog import INDICATORS
@@ -170,7 +171,7 @@ def home_page():
                 if st.button(
                     f"{icon}  {r['name']}   ·   {r['category']}  —  {r['unit']}",
                     key=f"home_{r['id']}",
-                    use_container_width=True,
+                    width="stretch",
                 ):
                     st.session_state.selected_id = r["id"]
                     st.rerun()
@@ -189,7 +190,7 @@ def home_page():
                         if st.button(
                             f"{icon}  {ind['name']}",
                             key=f"pop_{ind['id']}",
-                            use_container_width=True,
+                            width="stretch",
                         ):
                             st.session_state.selected_id = ind["id"]
                             st.rerun()
@@ -197,19 +198,19 @@ def home_page():
         st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)
         btn1, btn2, btn3, btn4 = st.columns(4)
         with btn1:
-            if st.button("📤  Upload data", use_container_width=True):
+            if st.button("📤  Upload data", width="stretch"):
                 st.session_state.page = "upload"
                 st.rerun()
         with btn2:
-            if st.button("🔗  Compare", use_container_width=True):
+            if st.button("🔗  Compare", width="stretch"):
                 st.session_state.page = "compare"
                 st.rerun()
         with btn3:
-            if st.button("🗺️  Sub-national", use_container_width=True):
+            if st.button("🗺️  Sub-national", width="stretch"):
                 st.session_state.page = "subnational"
                 st.rerun()
         with btn4:
-            if st.button("ℹ️  How it works", use_container_width=True):
+            if st.button("ℹ️  How it works", width="stretch"):
                 st.session_state.page = "about"
                 st.rerun()
 
@@ -261,19 +262,19 @@ def data_page():
             "<h1 style='color:#F1F5F9;font-size:1.4rem;margin-bottom:8px'>🌍 DevViz</h1>",
             unsafe_allow_html=True,
         )
-        if st.button("← New search", use_container_width=True):
+        if st.button("← New search", width="stretch"):
             st.session_state.selected_id = None
             st.session_state.page = "home"
             st.query_params.clear()
             st.rerun()
-        if st.button("🔗 Compare indicators", use_container_width=True):
+        if st.button("🔗 Compare indicators", width="stretch"):
             st.session_state.page = "compare"
             st.rerun()
 
         st.divider()
         if is_custom:
             st.caption("📤 Custom uploaded dataset")
-            if st.button("↑ Upload another file", use_container_width=True):
+            if st.button("↑ Upload another file", width="stretch"):
                 st.session_state.page = "upload"
                 st.session_state.selected_id = None
                 st.rerun()
@@ -332,7 +333,7 @@ def data_page():
             with cols[i]:
                 if st.button(
                     f"{CAT_ICON.get(alt['category'], '📊')} {alt['name']}",
-                    use_container_width=True,
+                    width="stretch",
                 ):
                     st.session_state.selected_id = alt["id"]
                     st.rerun()
@@ -607,7 +608,7 @@ def data_page():
                 indicator=indicator_t,
                 **shared_kw,
             )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     # ── Downloads ─────────────────────────────────────────────────────────────
     st.divider()
@@ -617,7 +618,7 @@ def data_page():
     with dl1:
         st.download_button(
             "⬇️ Data (CSV)", filtered.to_csv(index=False),
-            f"{indicator['id']}.csv", "text/csv", use_container_width=True,
+            f"{indicator['id']}.csv", "text/csv", width="stretch",
         )
     with dl2:
         try:
@@ -625,14 +626,14 @@ def data_page():
             fig.write_image(buf, format="png", scale=2, width=1400, height=800)
             st.download_button(
                 "⬇️ Chart (PNG)", buf.getvalue(),
-                f"{indicator['id']}.png", "image/png", use_container_width=True,
+                f"{indicator['id']}.png", "image/png", width="stretch",
             )
         except Exception:
-            st.button("⬇️ PNG (needs kaleido)", disabled=True, use_container_width=True)
+            st.button("⬇️ PNG (needs kaleido)", disabled=True, width="stretch")
     with dl3:
         st.download_button(
             "⬇️ Chart (HTML)", fig.to_html(full_html=True, include_plotlyjs="cdn"),
-            f"{indicator['id']}.html", "text/html", use_container_width=True,
+            f"{indicator['id']}.html", "text/html", width="stretch",
         )
     with dl4:
         try:
@@ -640,10 +641,10 @@ def data_page():
             fig.write_image(svg_buf, format="svg")
             st.download_button(
                 "⬇️ Chart (SVG)", svg_buf.getvalue(),
-                f"{indicator['id']}.svg", "image/svg+xml", use_container_width=True,
+                f"{indicator['id']}.svg", "image/svg+xml", width="stretch",
             )
         except Exception:
-            st.button("⬇️ SVG (needs kaleido)", disabled=True, use_container_width=True)
+            st.button("⬇️ SVG (needs kaleido)", disabled=True, width="stretch")
 
     # ── Reproduce this chart ──────────────────────────────────────────────────
     if not is_custom:
@@ -737,7 +738,7 @@ def upload_page():
         st.success(f"File read: **{df_raw.shape[0]:,}** rows × **{df_raw.shape[1]}** columns.")
 
         with st.expander("Preview (first 10 rows)", expanded=True):
-            st.dataframe(df_raw.head(10), use_container_width=True)
+            st.dataframe(df_raw.head(10), width="stretch")
 
         st.divider()
 
@@ -810,7 +811,7 @@ def upload_page():
         st.divider()
 
         # ── Step 4: normalise & plot ──────────────────────────────────────────
-        if st.button("📊  Plot it", type="primary", use_container_width=True):
+        if st.button("📊  Plot it", type="primary", width="stretch"):
             with st.spinner("Processing…"):
                 df_norm = normalise(
                     df_raw,
@@ -1086,7 +1087,7 @@ def subnational_page():
 
         st.success(f"File read: **{df_raw.shape[0]:,}** rows × **{df_raw.shape[1]}** columns.")
         with st.expander("Preview (first 10 rows)", expanded=True):
-            st.dataframe(df_raw.head(10), use_container_width=True)
+            st.dataframe(df_raw.head(10), width="stretch")
 
         # ── Step 4: Column mapping ──────────────────────────────────────────────
         st.markdown("### 4 · Map columns")
@@ -1129,7 +1130,7 @@ def subnational_page():
             log_scale = st.checkbox("Logarithmic scale")
 
         # ── Step 7: Build & display ─────────────────────────────────────────────
-        if not st.button("📊  Build map", type="primary", use_container_width=True):
+        if not st.button("📊  Build map", type="primary", width="stretch"):
             return
 
         # Prepare data
@@ -1185,7 +1186,7 @@ def subnational_page():
             subtitle=country_obj.name,
             source=uploaded.name,
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
         # Downloads
         st.divider()
@@ -1195,7 +1196,7 @@ def subnational_page():
                 "⬇️ Data (CSV)",
                 df_work.to_csv(index=False),
                 "subnational_data.csv", "text/csv",
-                use_container_width=True,
+                width="stretch",
             )
         with dl2:
             try:
@@ -1205,16 +1206,16 @@ def subnational_page():
                 st.download_button(
                     "⬇️ Chart (PNG)", buf.getvalue(),
                     "subnational_map.png", "image/png",
-                    use_container_width=True,
+                    width="stretch",
                 )
             except Exception:
-                st.button("⬇️ PNG (needs kaleido)", disabled=True, use_container_width=True)
+                st.button("⬇️ PNG (needs kaleido)", disabled=True, width="stretch")
         with dl3:
             st.download_button(
                 "⬇️ Chart (HTML)",
                 fig.to_html(full_html=True, include_plotlyjs="cdn"),
                 "subnational_map.html", "text/html",
-                use_container_width=True,
+                width="stretch",
             )
 
         st.markdown(
@@ -1398,7 +1399,7 @@ def compare_page():
                     subtitle=" · ".join(short_labels),
                     source="World Bank WDI",
                 )
-            st.plotly_chart(fig1, use_container_width=True)
+            st.plotly_chart(fig1, width="stretch")
 
         with tab2:
             st.caption(
@@ -1412,14 +1413,14 @@ def compare_page():
                 subtitle=" · ".join(short_labels),
                 source="World Bank WDI",
             )
-            st.plotly_chart(fig2, use_container_width=True)
+            st.plotly_chart(fig2, width="stretch")
 
         with tab3:
             display_df = merged.rename(columns=dict(zip(col_ids, col_labels)))
             display_df = display_df.sort_values(col_labels[0])
             st.dataframe(
                 display_df[["entity"] + col_labels].rename(columns={"entity": "Country"}),
-                use_container_width=True,
+                width="stretch",
                 height=420,
             )
             st.download_button(
