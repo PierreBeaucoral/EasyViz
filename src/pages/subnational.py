@@ -9,10 +9,42 @@ import pandas as pd
 import pycountry
 import streamlit as st
 
-from ..geo import fetch_admin_geojson, get_region_names, match_regions
+from ..geo import (
+    GeoFetchError,
+    fetch_admin_geojson,
+    get_region_names,
+    match_regions,
+    simplify_geojson,
+    subset_geojson,
+)
 from ..ui import download_buttons, hide_sidebar
 from ..uploader import read_uploaded_file
 from ..viz import make_admin_map
+
+
+def _render_geofetch_error(err: GeoFetchError, country: str, level: int) -> None:
+    """Turn a GeoFetchError into an actionable message, by `reason`."""
+    if err.reason == "timeout":
+        st.error(
+            f"⏱️ The geoBoundaries server timed out while downloading ADM{level} "
+            f"for **{country}**. ADM2 files for large countries can exceed 100 MB. "
+            "Try ADM1 first, or a smaller country."
+        )
+    elif err.reason == "unavailable":
+        st.error(
+            f"🗺️ **{country}** ADM{level} is not available in geoBoundaries. "
+            "Try ADM1, or pick a different country."
+        )
+    elif err.reason == "parse":
+        st.error(
+            "📄 geoBoundaries returned an unexpected response. This is usually "
+            "a transient upstream issue — retry in a minute."
+        )
+    else:  # "http" or unknown
+        st.error(
+            f"🌐 Could not reach geoBoundaries: {err}. "
+            "Check your connection and retry."
+        )
 
 
 def render() -> None:
@@ -65,19 +97,21 @@ def render() -> None:
         # ── 2. Fetch boundaries ───────────────────────────────────────────────
         st.markdown("### 2 · Fetch boundaries")
         with st.spinner(f"Downloading ADM{level} boundaries for **{country_obj.name}**…"):
-            geojson = fetch_admin_geojson(iso3, level)
-
-        if geojson is None:
-            st.error(
-                f"Could not download boundaries for **{country_obj.name}** ADM{level}. "
-                "This country or level may not be available in geoBoundaries. "
-                "Try ADM1 instead, or a different country."
-            )
-            return
+            try:
+                geojson = fetch_admin_geojson(iso3, level)
+            except GeoFetchError as e:
+                _render_geofetch_error(e, country_obj.name, level)
+                return
 
         geojson_names = get_region_names(geojson)
         n_regions = len(geojson_names)
         st.success(f"**{n_regions}** regions found.")
+        if level == 2 and n_regions > 1000:
+            st.warning(
+                f"ADM2 for {country_obj.name} has **{n_regions:,}** units — the map "
+                "will only render the regions present in your uploaded data (subsetting "
+                "happens automatically). If rendering is slow, try ADM1."
+            )
 
         with st.expander(f"Available region names ({n_regions})", expanded=False):
             st.write(", ".join(geojson_names))
@@ -229,8 +263,17 @@ def render() -> None:
         if sel_year:
             title_str += f" ({sel_year})"
 
+        # Subset to matched regions first (cheap, cuts payload for partial data),
+        # then simplify remaining polygons (Douglas-Peucker) to keep the browser
+        # responsive. For ADM2 of a big country this is the difference between
+        # a 100-MB unresponsive map and a 2-MB interactive one.
+        matched_names = set(df_work["region"].unique())
+        with st.spinner("Preparing map geometry…"):
+            geo_plot = subset_geojson(geojson, matched_names)
+            geo_plot = simplify_geojson(geo_plot, tolerance=0.01)
+
         fig = make_admin_map(
-            df_work, geojson=geojson,
+            df_work, geojson=geo_plot,
             title=title_str, color_scale=color_scale,
             unit=ind_unit or "value", log_scale=log_scale,
             subtitle=country_obj.name, source=uploaded.name,
