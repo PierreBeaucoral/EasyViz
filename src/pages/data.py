@@ -13,13 +13,31 @@ from ..metadata import build_metadata
 from ..regions import DEFAULT, PRESETS, resolve_preset
 from ..search import fuzzy_search
 from ..transforms import (
-    AGG_CHOICES, TRANSFORM_CHOICES, aggregate_period, apply_transform, period_label,
+    AGG_CHOICES,
+    TRANSFORM_CHOICES,
+    aggregate_period,
+    apply_transform,
+    period_label,
 )
 from ..ui import citation_panel, download_buttons, source_pill
-from ..viz import (
-    MAP_SCOPES, make_bar, make_box, make_histogram,
-    make_line, make_map,
+from ..urlstate import (
+    get_bool,
+    get_int_pair,
+    get_list,
+    set_bool,
+    set_int_pair,
+    set_list,
+    set_param,
 )
+from ..viz import (
+    MAP_SCOPES,
+    make_bar,
+    make_box,
+    make_histogram,
+    make_line,
+    make_map,
+)
+from ..wdi_taxonomy import load_all as _load_full_wdi
 
 CAT_ICON = {
     "Health": "🏥", "Economy": "💰", "Education": "📚",
@@ -35,7 +53,13 @@ def _resolve_indicator() -> dict | None:
             "id": "__custom__", "name": "Custom dataset",
             "category": "Custom", "source": "upload", "unit": "value", "tags": [],
         })
-    return next((r for r in INDICATORS if r["id"] == current_id), None)
+    hit = next((r for r in INDICATORS if r["id"] == current_id), None)
+    if hit is not None:
+        return hit
+    # Fallback: auto-imported WDI taxonomy entries (ids prefixed with `wdi_`).
+    if current_id and current_id.startswith("wdi_"):
+        return next((r for r in _load_full_wdi() if r["id"] == current_id), None)
+    return None
 
 
 def _sidebar(indicator: dict, is_custom: bool) -> None:
@@ -142,14 +166,17 @@ def render() -> None:
 
     st.divider()
 
-    # ── Filters ───────────────────────────────────────────────────────────────
+    # ── Filters (URL-restored defaults) ───────────────────────────────────────
     all_countries = sorted(df["entity"].unique().tolist())
+    _url_countries = [c for c in get_list("countries") if c in all_countries]
+    _url_years = get_int_pair("years")
+    _url_log = get_bool("log")
 
     col_p, col_c, col_y = st.columns([1, 3, 1])
     with col_p:
         preset = st.selectbox("Preset", list(PRESETS.keys()), index=0)
     with col_c:
-        default_sel = resolve_preset(preset, all_countries) or [
+        default_sel = _url_countries or resolve_preset(preset, all_countries) or [
             c for c in DEFAULT if c in all_countries
         ][:15]
         selected_countries = st.multiselect(
@@ -161,10 +188,13 @@ def render() -> None:
     year_min, year_max = int(df["year"].min()), int(df["year"].max())
     with col_y:
         if year_min < year_max:
+            _default_range = (max(year_min, year_max - 20), year_max)
+            if _url_years and year_min <= _url_years[0] <= _url_years[1] <= year_max:
+                _default_range = _url_years
             year_range = st.slider(
                 "Year range",
                 min_value=year_min, max_value=year_max,
-                value=(max(year_min, year_max - 20), year_max),
+                value=_default_range,
             )
         else:
             year_range = (year_min, year_max)
@@ -238,7 +268,7 @@ def render() -> None:
             x_label = st.text_input("X label", placeholder="Year")
         with ax2:
             y_label = st.text_input("Y label", placeholder=indicator["unit"])
-        log_scale = st.checkbox("Logarithmic scale")
+        log_scale = st.checkbox("Logarithmic scale", value=_url_log)
         color_scale = st.selectbox(
             "Color palette",
             ["Blues", "Viridis", "RdYlGn", "Plasma", "YlOrRd",
@@ -350,6 +380,15 @@ def render() -> None:
                 top_n=top_n, indicator=indicator_t, **shared_kw,
             )
         st.plotly_chart(fig, width="stretch")
+
+    # ── Persist view state to URL (bookmarkable) ──────────────────────────────
+    set_param("ind", indicator["id"])
+    set_list("countries", selected_countries)
+    if year_min < year_max:
+        set_int_pair("years", (int(year_range[0]), int(year_range[1])))
+    set_param("chart", chart_type.split(" ", 1)[-1] if " " in chart_type else chart_type)
+    set_param("tf", transform)
+    set_bool("log", bool(log_scale))
 
     # ── Citation panel ────────────────────────────────────────────────────────
     if not is_custom:

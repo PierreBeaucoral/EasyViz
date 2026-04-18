@@ -15,8 +15,9 @@ from __future__ import annotations
 import streamlit as st
 
 from src.catalog import INDICATORS
-from src.pages import about, compare, data, home, subnational, upload
+from src.pages import about, compare, conflict, data, home, subnational, upload
 from src.ui import inject_global_css
+from src.urlstate import embed_css, is_embed
 
 # ── Page config ───────────────────────────────────────────────────────────────
 
@@ -27,6 +28,10 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 inject_global_css()
+
+# Embed mode: hide sidebar / header / footer when loaded via iframe.
+if is_embed():
+    st.markdown(embed_css(), unsafe_allow_html=True)
 
 
 # ── Session-state bootstrap ───────────────────────────────────────────────────
@@ -42,7 +47,10 @@ def _init_state() -> None:
 
     qp = st.query_params
     ind_id = qp.get("ind")
-    if ind_id and any(r["id"] == ind_id for r in INDICATORS):
+    # Accept curated indicator ids; deep-links to auto-imported WDI codes
+    # (prefix `wdi_`) are resolved lazily on the data page.
+    curated_ids = {r["id"] for r in INDICATORS}
+    if ind_id and (ind_id in curated_ids or ind_id.startswith("wdi_")):
         st.session_state.selected_id = ind_id
         st.session_state.page = "data"
     else:
@@ -65,6 +73,7 @@ _ROUTES = {
     "upload":      upload.render,
     "compare":     compare.render,
     "subnational": subnational.render,
+    "conflict":    conflict.render,
 }
 
 _page = st.session_state.get("page", "home")

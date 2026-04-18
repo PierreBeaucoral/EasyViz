@@ -9,7 +9,6 @@ normalisation.
 from __future__ import annotations
 
 import pandas as pd
-import pytest
 
 from src.uploader import (
     _build_iso3_map,
@@ -18,7 +17,6 @@ from src.uploader import (
     detect_format,
     normalise,
 )
-
 
 # ── _norm ─────────────────────────────────────────────────────────────────────
 
@@ -126,7 +124,7 @@ def test_iso3_resolution_handles_fuzzy_typos():
     out = _call(["Unkted States", "Frnace"])
     # Don't assert exact ISO3 — rapidfuzz can differ across versions. Just
     # check that SOMETHING reasonable came out (not empty, three letters).
-    for k, v in out.items():
+    for _k, v in out.items():
         assert v == "" or (len(v) == 3 and v.isupper())
 
 

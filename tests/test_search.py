@@ -7,8 +7,6 @@ indicators above irrelevant ones and handles empty queries correctly.
 
 from __future__ import annotations
 
-import pytest
-
 from src.catalog import INDICATORS
 from src.search import fuzzy_search
 

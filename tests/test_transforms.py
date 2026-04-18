@@ -21,7 +21,6 @@ from src.transforms import (
     period_label,
 )
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 @pytest.fixture

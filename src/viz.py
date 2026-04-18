@@ -341,7 +341,7 @@ def make_scatter_matrix(
     source: str = "",
 ) -> go.Figure:
     df = df_wide.dropna(subset=indicator_cols).copy()
-    df = df.rename(columns=dict(zip(indicator_cols, col_labels)))
+    df = df.rename(columns=dict(zip(indicator_cols, col_labels, strict=False)))
 
     fig = px.scatter_matrix(
         df,
@@ -494,6 +494,78 @@ def make_box(
         xaxis=dict(showgrid=False, zeroline=False),
         yaxis=dict(showgrid=True, gridcolor="#F1F5F9"),
         showlegend=False,
+    )
+    _base_layout(fig, title, subtitle=subtitle, source=source)
+    return fig
+
+
+# ── Gapminder-style animated scatter ──────────────────────────────────────────
+
+def make_gapminder(
+    df_long: pd.DataFrame,
+    x_col: str,
+    y_col: str,
+    size_col: str | None,
+    x_label: str,
+    y_label: str,
+    size_label: str,
+    title: str,
+    subtitle: str = "",
+    source: str = "",
+    log_x: bool = False,
+    log_y: bool = False,
+) -> go.Figure:
+    """
+    Gapminder-style animated bubble scatter.
+
+    Expects a long DataFrame with columns:
+        entity, iso3, year, <x_col>, <y_col>, optional <size_col>
+
+    Animates over `year`; each frame is a cross-section. When `size_col`
+    is None, a constant bubble size is used.
+    """
+    df = df_long.dropna(subset=[x_col, y_col]).copy()
+    if size_col:
+        df = df.dropna(subset=[size_col]).copy()
+        df[size_col] = df[size_col].clip(lower=0)
+
+    # Fix axis ranges so bubbles don't jump between frames.
+    x_pad = (df[x_col].max() - df[x_col].min()) * 0.05 if len(df) else 1
+    y_pad = (df[y_col].max() - df[y_col].min()) * 0.05 if len(df) else 1
+    x_range = [df[x_col].min() - x_pad, df[x_col].max() + x_pad]
+    y_range = [df[y_col].min() - y_pad, df[y_col].max() + y_pad]
+
+    kw = dict(
+        data_frame=df.sort_values(["year", "entity"]),
+        x=x_col, y=y_col,
+        color="entity",
+        animation_frame="year",
+        animation_group="entity",
+        hover_name="entity",
+        template=_TEMPLATE,
+        labels={x_col: x_label, y_col: y_label, "entity": "Country"},
+        log_x=log_x,
+        log_y=log_y,
+        range_x=x_range if not log_x else None,
+        range_y=y_range if not log_y else None,
+    )
+    if size_col:
+        kw.update(size=size_col, size_max=55)
+        kw["labels"][size_col] = size_label
+
+    fig = px.scatter(**kw)
+    fig.update_traces(
+        marker=dict(line=dict(width=0.5, color="rgba(255,255,255,0.7)")),
+    )
+    fig.update_layout(
+        height=600,
+        legend=dict(
+            orientation="v", x=1.02, y=1,
+            bgcolor="rgba(255,255,255,0.9)", bordercolor="#E2E8F0", borderwidth=1,
+            title=dict(text="Country"),
+        ),
+        xaxis=dict(showgrid=True, gridcolor="#F1F5F9", zeroline=False),
+        yaxis=dict(showgrid=True, gridcolor="#F1F5F9", zeroline=False),
     )
     _base_layout(fig, title, subtitle=subtitle, source=source)
     return fig

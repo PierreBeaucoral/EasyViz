@@ -20,7 +20,6 @@ from src.geo import (
     subset_geojson,
 )
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 def _square(lon0: float, lat0: float, size: float = 1.0) -> dict:
@@ -183,7 +182,7 @@ def test_fetch_raises_timeout_when_requests_times_out(monkeypatch):
     def fake_get(*a, **kw):
         raise requests.Timeout("simulated")
 
-    monkeypatch.setattr("src.geo.requests.get", fake_get)
+    monkeypatch.setattr("src.geo._session.get", fake_get)
     # Bypass streamlit cache so monkeypatch isn't shadowed by a cached result.
     fetch = getattr(fetch_admin_geojson, "__wrapped__", fetch_admin_geojson)
 
@@ -196,7 +195,7 @@ def test_fetch_raises_unavailable_when_metadata_has_no_url(monkeypatch):
     class _R:
         def json(self):
             return {}
-    monkeypatch.setattr("src.geo.requests.get", lambda *a, **kw: _R())
+    monkeypatch.setattr("src.geo._session.get", lambda *a, **kw: _R())
     fetch = getattr(fetch_admin_geojson, "__wrapped__", fetch_admin_geojson)
 
     with pytest.raises(GeoFetchError) as excinfo:

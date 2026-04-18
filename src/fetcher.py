@@ -22,6 +22,9 @@ import pandas as pd
 import requests
 import streamlit as st
 
+from . import diskcache
+from .http import session as _session
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 _WB_API = (
@@ -106,10 +109,15 @@ def fetch_many(indicators: list[dict], max_workers: int = 5) -> dict[str, FetchR
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def _fetch_owid(slug: str) -> FetchResult:
-    """Fetch an OWID grapher CSV."""
+    """Fetch an OWID grapher CSV (disk-cache first, network on miss)."""
+    cached = diskcache.load("owid", slug)
+    if cached is not None:
+        df_cached, snap = cached
+        return FetchResult(df=df_cached, snapshot=snap)
+
     url = f"https://ourworldindata.org/grapher/{slug}.csv"
     try:
-        r = requests.get(url, headers=_HEADERS, timeout=30)
+        r = _session.get(url, headers=_HEADERS, timeout=30)
         r.raise_for_status()
     except requests.RequestException as e:
         raise FetchError(f"OWID network error for {slug!r}: {e}") from e
@@ -134,7 +142,9 @@ def _fetch_owid(slug: str) -> FetchResult:
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
     df = df.dropna(subset=["year", "value"]).astype({"year": int})
 
-    return FetchResult(df=df, snapshot=datetime.now(timezone.utc))
+    snapshot = datetime.now(timezone.utc)
+    diskcache.save("owid", slug, df, snapshot)
+    return FetchResult(df=df, snapshot=snapshot)
 
 
 # ── WDI ───────────────────────────────────────────────────────────────────────
@@ -142,12 +152,17 @@ def _fetch_owid(slug: str) -> FetchResult:
 @st.cache_data(ttl=3600, show_spinner=False)
 def _fetch_wdi(code: str) -> FetchResult:
     """Fetch a WDI indicator from the World Bank API, handling pagination."""
+    cached = diskcache.load("wdi", code)
+    if cached is not None:
+        df_cached, snap = cached
+        return FetchResult(df=df_cached, snapshot=snap)
+
     records: list[dict] = []
     page = 1
 
     while True:
         try:
-            r = requests.get(
+            r = _session.get(
                 _WB_API.format(code=code, end=_WB_END_YEAR, page=page),
                 headers=_HEADERS,
                 timeout=60,
@@ -185,4 +200,7 @@ def _fetch_wdi(code: str) -> FetchResult:
             "or the series is aggregate-only."
         )
 
-    return FetchResult(df=pd.DataFrame(records), snapshot=datetime.now(timezone.utc))
+    df = pd.DataFrame(records)
+    snapshot = datetime.now(timezone.utc)
+    diskcache.save("wdi", code, df, snapshot)
+    return FetchResult(df=df, snapshot=snapshot)

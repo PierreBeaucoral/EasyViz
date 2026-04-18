@@ -5,7 +5,16 @@ Unit tests for `src.regions` — preset country groupings.
 from __future__ import annotations
 
 from src.regions import (
-    BRICS, DEFAULT, EU27, G7, LDC, LMIC, OECD, PRESETS, SSA, resolve_preset,
+    BRICS,
+    DEFAULT,
+    EU27,
+    G7,
+    LDC,
+    LMIC,
+    OECD,
+    PRESETS,
+    SSA,
+    resolve_preset,
 )
 
 

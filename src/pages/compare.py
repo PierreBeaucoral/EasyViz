@@ -14,7 +14,7 @@ from ..catalog import INDICATORS
 from ..fetcher import fetch_many
 from ..regions import DEFAULT, PRESETS, resolve_preset
 from ..ui import hide_sidebar
-from ..viz import make_corr_heatmap, make_scatter, make_scatter_matrix
+from ..viz import make_corr_heatmap, make_gapminder, make_scatter, make_scatter_matrix
 
 
 def render() -> None:
@@ -159,8 +159,8 @@ def render() -> None:
         short_labels = [n[:28] + "…" if len(n) > 28 else n for n in col_labels]
 
         # ── Tabs ──────────────────────────────────────────────────────────────
-        tab1, tab2, tab3 = st.tabs(
-            ["📊 Scatter", "🌡️ Correlation heatmap", "📋 Data table"]
+        tab1, tab2, tab3, tab4 = st.tabs(
+            ["📊 Scatter", "🌡️ Correlation heatmap", "📋 Data table", "🎞️ Gapminder"]
         )
 
         with tab1:
@@ -212,7 +212,7 @@ def render() -> None:
             )
 
         with tab3:
-            display_df = merged.rename(columns=dict(zip(col_ids, col_labels)))
+            display_df = merged.rename(columns=dict(zip(col_ids, col_labels, strict=False)))
             display_df = display_df.sort_values(col_labels[0])
             st.dataframe(
                 display_df[["entity"] + col_labels].rename(columns={"entity": "Country"}),
@@ -224,6 +224,73 @@ def render() -> None:
                 "comparison.csv",
                 "text/csv",
             )
+
+        with tab4:
+            st.caption(
+                "Animated bubble chart: X / Y / optional bubble-size indicators. "
+                "Hit ▶ to animate across years. Best with 2–3 indicators and 10–30 countries."
+            )
+            if len(col_ids) < 2:
+                st.info("Pick at least 2 indicators to build a Gapminder view.")
+            else:
+                # Build panel (long) merged across years for the Gapminder view.
+                panel = None
+                for ind_id, (df_i, _ind) in dfs.items():
+                    df_p = df_i[df_i["entity"].isin(_countries)][
+                        ["entity", "iso3", "year", "value"]
+                    ].rename(columns={"value": ind_id})
+                    panel = df_p if panel is None else panel.merge(
+                        df_p, on=["entity", "iso3", "year"], how="inner",
+                    )
+                panel = panel.dropna(subset=[col_ids[0], col_ids[1]])
+                if panel.empty:
+                    st.warning("No overlapping years across the selected indicators.")
+                else:
+                    g1, g2, g3, g4 = st.columns(4)
+                    with g1:
+                        x_axis = st.selectbox(
+                            "X axis", options=col_ids,
+                            format_func=lambda x: col_labels[col_ids.index(x)],
+                            index=0, key="gap_x",
+                        )
+                    with g2:
+                        _y_idx = 1 if len(col_ids) > 1 else 0
+                        y_axis = st.selectbox(
+                            "Y axis", options=col_ids,
+                            format_func=lambda x: col_labels[col_ids.index(x)],
+                            index=_y_idx, key="gap_y",
+                        )
+                    with g3:
+                        size_choices = ["(none)"] + [c for c in col_ids if c not in (x_axis, y_axis)]
+                        size_label = st.selectbox(
+                            "Bubble size", options=size_choices,
+                            format_func=lambda x: (
+                                "None" if x == "(none)"
+                                else col_labels[col_ids.index(x)]
+                            ),
+                            key="gap_size",
+                        )
+                        size_col = None if size_label == "(none)" else size_label
+                    with g4:
+                        log_x_gap = st.checkbox("log-X", key="gap_log_x")
+                        log_y_gap = st.checkbox("log-Y", key="gap_log_y")
+
+                    fig_gap = make_gapminder(
+                        panel,
+                        x_col=x_axis, y_col=y_axis, size_col=size_col,
+                        x_label=col_labels[col_ids.index(x_axis)],
+                        y_label=col_labels[col_ids.index(y_axis)],
+                        size_label=(
+                            "" if size_col is None
+                            else col_labels[col_ids.index(size_col)]
+                        ),
+                        title="Gapminder-style animated scatter",
+                        subtitle=f"{panel['year'].min()}–{panel['year'].max()} "
+                                 f"· {panel['entity'].nunique()} countries",
+                        source="World Bank WDI",
+                        log_x=log_x_gap, log_y=log_y_gap,
+                    )
+                    st.plotly_chart(fig_gap, width="stretch")
 
         st.markdown(
             "<br><p style='text-align:center;color:#94A3B8;font-size:0.78rem'>"

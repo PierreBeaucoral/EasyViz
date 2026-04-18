@@ -22,6 +22,8 @@ from datetime import datetime, timezone
 import requests
 import streamlit as st
 
+from .http import session as _session
+
 _WB_META_URL = (
     "https://api.worldbank.org/v2/indicator/{code}?format=json"
 )
@@ -144,7 +146,7 @@ def _fetch_wdi_metadata(code: str) -> dict:
     caller can fall back to catalog-provided defaults.
     """
     try:
-        r = requests.get(_WB_META_URL.format(code=code), headers=_HEADERS, timeout=15)
+        r = _session.get(_WB_META_URL.format(code=code), headers=_HEADERS, timeout=15)
         r.raise_for_status()
         body = r.json()
         if not body or len(body) < 2 or not body[1]:

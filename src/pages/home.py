@@ -9,6 +9,7 @@ import streamlit as st
 from ..catalog import INDICATORS
 from ..search import fuzzy_search
 from ..ui import hide_sidebar
+from ..wdi_taxonomy import load_all as load_full_wdi
 
 CAT_ICON = {
     "Health": "🏥", "Economy": "💰", "Education": "📚",
@@ -79,9 +80,22 @@ def render() -> None:
             placeholder="🔍   child mortality, GDP, CO₂, poverty, literacy…",
             label_visibility="collapsed",
         )
+        use_full = st.checkbox(
+            "Search full World Bank catalogue (~1,500 indicators)",
+            value=False,
+            help="Curated list shows ~80 hand-picked indicators with clean tags. "
+                 "Full catalogue covers every WDI series — slower search, less curated.",
+        )
 
         if query:
-            results = fuzzy_search(query, INDICATORS, limit=7)
+            search_space = INDICATORS
+            if use_full:
+                extra = load_full_wdi()
+                # Deduplicate: curated entries win over raw-imported ones.
+                seen_codes = {r.get("indicator") for r in INDICATORS if r.get("source") == "wdi"}
+                extra_unique = [r for r in extra if r["indicator"] not in seen_codes]
+                search_space = INDICATORS + extra_unique
+            results = fuzzy_search(query, search_space, limit=7)
             st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
             for r in results:
                 icon = CAT_ICON.get(r["category"], "📊")
@@ -119,7 +133,7 @@ def render() -> None:
                             st.rerun()
 
         st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)
-        btn1, btn2, btn3, btn4 = st.columns(4)
+        btn1, btn2, btn3, btn4, btn5 = st.columns(5)
         with btn1:
             if st.button("📤  Upload data", width="stretch"):
                 st.session_state.page = "upload"
@@ -133,6 +147,10 @@ def render() -> None:
                 st.session_state.page = "subnational"
                 st.rerun()
         with btn4:
+            if st.button("⚔️  Conflict data", width="stretch"):
+                st.session_state.page = "conflict"
+                st.rerun()
+        with btn5:
             if st.button("ℹ️  How it works", width="stretch"):
                 st.session_state.page = "about"
                 st.rerun()

@@ -240,7 +240,7 @@ def _build_iso3_map(entities: tuple[str, ...]) -> dict[str, str]:
       4. rapidfuzz token-sort ratio against the lookup table (score ≥ 80)
       5. Empty string (country won't appear on choropleth)
     """
-    from rapidfuzz import process, fuzz
+    from rapidfuzz import fuzz, process
 
     lookup = _get_lookup()
     lookup_keys = list(lookup.keys())

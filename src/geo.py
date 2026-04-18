@@ -19,6 +19,8 @@ import requests
 import streamlit as st
 from rapidfuzz import fuzz, process
 
+from .http import session as _session
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 _GB_API = "https://www.geoboundaries.org/api/current/gbOpen/{iso3}/ADM{level}/"
@@ -56,7 +58,7 @@ def fetch_admin_geojson(iso3: str, level: int = 1) -> dict:
     meta_url = _GB_API.format(iso3=iso3.upper(), level=level)
 
     try:
-        meta = requests.get(meta_url, headers=_HEADERS, timeout=20).json()
+        meta = _session.get(meta_url, headers=_HEADERS, timeout=20).json()
     except requests.Timeout as e:
         raise GeoFetchError(
             f"geoBoundaries metadata request timed out for {iso3} ADM{level}",
@@ -78,7 +80,7 @@ def fetch_admin_geojson(iso3: str, level: int = 1) -> dict:
 
     # Large ADM2 payloads can be 50–100 MB → generous timeout + streaming read.
     try:
-        r = requests.get(dl_url, headers=_HEADERS, timeout=180)
+        r = _session.get(dl_url, headers=_HEADERS, timeout=180)
         r.raise_for_status()
         return r.json()
     except requests.Timeout as e:
