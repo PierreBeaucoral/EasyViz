@@ -15,35 +15,44 @@ import streamlit as st
 # ── File reading ───────────────────────────────────────────────────────────────
 
 def read_uploaded_file(uploaded_file) -> pd.DataFrame | None:
-    """Read CSV or XLSX/XLS from a Streamlit UploadedFile object.
+    """
+    Read CSV or XLSX/XLS from a Streamlit UploadedFile object.
 
-    Tries multiple separator / decimal combinations and returns whichever
-    produces the most numeric columns (handles both dot and comma decimals).
+    CSVs: we probe common (separator, decimal, encoding) combinations and
+    pick whichever parse produced the most numeric columns — handles French
+    `;` + `,` files, Anglo `,` + `.` files, and Latin-1 encodings.
+
+    Returns None only when no probe succeeded, so the UI can render a
+    single generic "could not read" error message.
     """
     name = uploaded_file.name.lower()
     raw = uploaded_file.read()
-    try:
-        if name.endswith(".csv"):
-            best: tuple[int, pd.DataFrame] | None = None
-            for enc in ("utf-8", "latin-1", "cp1252"):
-                for sep, decimal in [(None, "."), (";", ","), (",", ".")]:
-                    try:
-                        df = pd.read_csv(
-                            io.BytesIO(raw), sep=sep, decimal=decimal,
-                            engine="python", encoding=enc,
-                        )
-                        if df.shape[1] < 2:
-                            continue
-                        n_numeric = df.select_dtypes(include="number").shape[1]
-                        if best is None or n_numeric > best[0]:
-                            best = (n_numeric, df)
-                    except Exception:
-                        continue
-            return best[1] if best else None
-        elif name.endswith((".xlsx", ".xls")):
+
+    if name.endswith(".csv"):
+        best: tuple[int, pd.DataFrame] | None = None
+        for enc in ("utf-8", "latin-1", "cp1252"):
+            for sep, decimal in [(None, "."), (";", ","), (",", ".")]:
+                try:
+                    df = pd.read_csv(
+                        io.BytesIO(raw), sep=sep, decimal=decimal,
+                        engine="python", encoding=enc,
+                    )
+                except (UnicodeDecodeError, pd.errors.ParserError, ValueError):
+                    # Expected when the combo is wrong — try the next one.
+                    continue
+                if df.shape[1] < 2:
+                    continue
+                n_numeric = df.select_dtypes(include="number").shape[1]
+                if best is None or n_numeric > best[0]:
+                    best = (n_numeric, df)
+        return best[1] if best else None
+
+    if name.endswith((".xlsx", ".xls")):
+        try:
             return pd.read_excel(io.BytesIO(raw))
-    except Exception:
-        return None
+        except (ValueError, OSError):
+            return None
+
     return None
 
 

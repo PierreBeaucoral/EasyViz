@@ -9,7 +9,7 @@ from rapidfuzz import fuzz, process
 
 # geoBoundaries REST API — free, no key required
 _GB_API = "https://www.geoboundaries.org/api/current/gbOpen/{iso3}/ADM{level}/"
-_HEADERS = {"User-Agent": "DevViz/1.0 (educational use)"}
+_HEADERS = {"User-Agent": "EasyViz/1.0 (educational use)"}
 
 # The property used by geoBoundaries for region names
 NAME_PROP = "shapeName"
@@ -24,12 +24,16 @@ def fetch_admin_geojson(iso3: str, level: int = 1) -> dict | None:
     try:
         meta_url = _GB_API.format(iso3=iso3.upper(), level=level)
         meta = requests.get(meta_url, headers=_HEADERS, timeout=20).json()
-        dl_url = meta.get("gjDownloadURL") or meta.get("downloadURL")
-        if not dl_url:
-            return None
-        gj = requests.get(dl_url, headers=_HEADERS, timeout=90).json()
-        return gj
-    except Exception:
+    except (requests.RequestException, ValueError):
+        return None
+
+    dl_url = meta.get("gjDownloadURL") or meta.get("downloadURL")
+    if not dl_url:
+        return None
+
+    try:
+        return requests.get(dl_url, headers=_HEADERS, timeout=90).json()
+    except (requests.RequestException, ValueError):
         return None
 
 

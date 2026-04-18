@@ -1,12 +1,32 @@
 """
-Plotly chart builders for DevViz.
-All functions return a go.Figure ready for st.plotly_chart.
+Plotly chart builders for EasyViz.
+
+Academic-use rules enforced here:
+
+  1. Missing observations never connect: line charts set `connectgaps=False`
+     and draw markers on observed years so gaps are visible.
+  2. Scatter pages offer a fitted overlay (OLS / LOESS) with R² shown.
+  3. Correlation heatmap accepts `method="spearman"` for non-normal data.
+  4. `_apply_log` is now imported from `src.transforms` — numerical
+     transformations live in a single place.
+
+All functions return a `go.Figure` ready for `st.plotly_chart`.
 """
 
+from __future__ import annotations
+
 import numpy as np
+import pandas as pd
 import plotly.colors as pc
 import plotly.express as px
 import plotly.graph_objects as go
+
+from .transforms import log1p_positive
+
+# ── Style constants ───────────────────────────────────────────────────────────
+
+_TEMPLATE = "plotly_white"
+_FONT = dict(family="Inter, Arial, sans-serif", size=13, color="#1E293B")
 
 
 def _scale_color(color_scale: str, pos: float = 0.65) -> str:
@@ -15,15 +35,6 @@ def _scale_color(color_scale: str, pos: float = 0.65) -> str:
         return pc.sample_colorscale(color_scale, [pos])[0]
     except Exception:
         return "#2563EB"
-
-_TEMPLATE = "plotly_white"
-_FONT = dict(family="Inter, Arial, sans-serif", size=13, color="#1E293B")
-
-
-def _apply_log(df, col: str = "value") -> tuple:
-    df = df.copy()
-    df[col] = np.log1p(df[col].clip(lower=0))
-    return df, "(log scale)"
 
 
 def _base_layout(
@@ -37,7 +48,6 @@ def _base_layout(
     if subtitle:
         title_text = f"{title}<br><sup style='color:#64748B'>{subtitle}</sup>"
 
-    # Source footnote placed well below the x-axis tick labels
     annotations = []
     if source:
         annotations.append(dict(
@@ -49,7 +59,6 @@ def _base_layout(
             align="left",
         ))
 
-    # Enough bottom margin so source text sits below x-axis ticks
     bottom_margin = 90 + extra_margin_b if source else 50 + extra_margin_b
 
     fig.update_layout(
@@ -66,7 +75,6 @@ def _base_layout(
 
 # ── World map ──────────────────────────────────────────────────────────────────
 
-# Plotly scope strings mapped from display names
 MAP_SCOPES = {
     "🌍 World":         "world",
     "🌍 Africa":        "africa",
@@ -74,12 +82,12 @@ MAP_SCOPES = {
     "🌎 North America": "north america",
     "🌎 South America": "south america",
     "🌍 Europe":        "europe",
-    "🌊 Oceania":       "world",   # Plotly has no oceania scope; zoom via geo center instead
+    "🌊 Oceania":       "world",   # Plotly has no oceania scope; fall back to world
 }
 
 
 def make_map(
-    df,
+    df: pd.DataFrame,
     title: str,
     color_scale: str,
     indicator: dict,
@@ -93,10 +101,9 @@ def make_map(
 
     unit_label = indicator["unit"]
     if log_scale:
-        df, suffix = _apply_log(df)
+        df, suffix = log1p_positive(df)
         unit_label = f"{unit_label} {suffix}"
 
-    # Natural earth looks good for world; use equirectangular for regions
     projection = "natural earth" if scope == "world" else "equirectangular"
 
     fig = px.choropleth(
@@ -134,7 +141,7 @@ def make_map(
 # ── Line chart ────────────────────────────────────────────────────────────────
 
 def make_line(
-    df,
+    df: pd.DataFrame,
     title: str,
     indicator: dict,
     log_scale: bool = False,
@@ -143,11 +150,16 @@ def make_line(
     xlabel: str = "Year",
     ylabel: str = "",
 ) -> go.Figure:
+    """
+    Line chart with missing-data integrity:
+      * `connectgaps=False` → no visual interpolation across NaN years
+      * Markers on observed years → gap structure is visible at a glance
+    """
     df = df.dropna(subset=["value"]).copy()
 
     unit_label = indicator["unit"]
     if log_scale:
-        df, suffix = _apply_log(df)
+        df, suffix = log1p_positive(df)
         unit_label = f"{unit_label} {suffix}"
 
     y_label = ylabel if ylabel else unit_label
@@ -160,6 +172,7 @@ def make_line(
         template=_TEMPLATE,
     )
     fig.update_traces(
+        connectgaps=False,
         marker=dict(size=5),
         line=dict(width=2),
         hovertemplate="<b>%{fullData.name}</b><br>Year: %{x}<br>%{y:,.2f}<extra></extra>",
@@ -182,7 +195,7 @@ def make_line(
 # ── Bar chart ─────────────────────────────────────────────────────────────────
 
 def make_bar(
-    df,
+    df: pd.DataFrame,
     title: str,
     indicator: dict,
     log_scale: bool = False,
@@ -197,7 +210,7 @@ def make_bar(
 
     unit_label = indicator["unit"]
     if log_scale:
-        df, suffix = _apply_log(df)
+        df, suffix = log1p_positive(df)
         unit_label = f"{unit_label} {suffix}"
 
     x_label = xlabel if xlabel else unit_label
@@ -223,29 +236,60 @@ def make_bar(
     return fig
 
 
-# ── Simple scatter (2 indicators) ────────────────────────────────────────────
+# ── Scatter (2 indicators) with optional OLS / LOESS + R² ──────────────────────
+
+def _fit_overlay(x: np.ndarray, y: np.ndarray, kind: str) -> tuple[np.ndarray, np.ndarray, float]:
+    """
+    Return (x_sorted, y_hat, r2) for an OLS or LOESS fit.
+
+    OLS → closed form via numpy. LOESS → statsmodels `lowess`. R² is
+    computed against the raw y (not the fit line) so it is comparable
+    across kinds.
+    """
+    order = np.argsort(x)
+    xs, ys = x[order], y[order]
+
+    if kind == "OLS":
+        slope, intercept = np.polyfit(xs, ys, 1)
+        y_hat = slope * xs + intercept
+    elif kind == "LOESS":
+        from statsmodels.nonparametric.smoothers_lowess import lowess
+        smoothed = lowess(ys, xs, frac=0.5, it=1, return_sorted=True)
+        xs, y_hat = smoothed[:, 0], smoothed[:, 1]
+    else:
+        return xs, ys, float("nan")
+
+    ss_res = float(np.sum((ys - np.interp(xs, xs, y_hat)) ** 2))
+    ss_tot = float(np.sum((ys - ys.mean()) ** 2))
+    r2 = 1 - ss_res / ss_tot if ss_tot > 0 else float("nan")
+    return xs, y_hat, r2
+
 
 def make_scatter(
-    df_wide,
-    indicator_cols: list,
-    col_labels: list,
+    df_wide: pd.DataFrame,
+    indicator_cols: list[str],
+    col_labels: list[str],
     title: str,
     subtitle: str = "",
     source: str = "",
+    log_x: bool = False,
+    log_y: bool = False,
+    fit: str = "None",   # "None" | "OLS" | "LOESS"
 ) -> go.Figure:
-    """Plain scatter plot for exactly 2 indicators — country name on hover."""
+    """Scatter for exactly 2 indicators with optional log axes and fit overlay."""
     x_col, y_col = indicator_cols
     x_label, y_label = col_labels
     df = df_wide.dropna(subset=indicator_cols).copy()
 
     fig = px.scatter(
         df,
-        x=x_col,
-        y=y_col,
+        x=x_col, y=y_col,
         hover_name="entity",
         template=_TEMPLATE,
         opacity=0.75,
         labels={x_col: x_label, y_col: y_label},
+        log_x=log_x,
+        log_y=log_y,
     )
     fig.update_traces(
         marker=dict(size=7, line=dict(width=0.5, color="rgba(255,255,255,0.6)"),
@@ -254,26 +298,48 @@ def make_scatter(
                       + x_label + ": %{x:,.2f}<br>"
                       + y_label + ": %{y:,.2f}<extra></extra>",
     )
+
+    if fit in ("OLS", "LOESS") and len(df) >= 3:
+        x_raw = df[x_col].to_numpy()
+        y_raw = df[y_col].to_numpy()
+        # When the axis is log-scaled, fit in log space so the line is straight.
+        x_fit = np.log10(np.clip(x_raw, 1e-12, None)) if log_x else x_raw
+        y_fit = np.log10(np.clip(y_raw, 1e-12, None)) if log_y else y_raw
+        xs, y_hat, r2 = _fit_overlay(x_fit, y_fit, fit)
+        xs_plot = 10 ** xs if log_x else xs
+        ys_plot = 10 ** y_hat if log_y else y_hat
+        fig.add_trace(go.Scatter(
+            x=xs_plot, y=ys_plot,
+            mode="lines",
+            line=dict(color="#DC2626", width=2, dash="solid"),
+            name=f"{fit} fit (R² = {r2:.2f})" if not np.isnan(r2) else fit,
+            hoverinfo="skip",
+        ))
+
     fig.update_layout(
         xaxis=dict(showgrid=True, gridcolor="#F1F5F9", zeroline=False),
         yaxis=dict(showgrid=True, gridcolor="#F1F5F9", zeroline=False),
         height=520,
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+            bgcolor="rgba(255,255,255,0.9)",
+        ),
+        showlegend=fit in ("OLS", "LOESS"),
     )
     _base_layout(fig, title, subtitle=subtitle, source=source)
     return fig
 
 
-# ── Scatter matrix (3+ indicators) ────────────────────────────────────────────
+# ── Scatter matrix ────────────────────────────────────────────────────────────
 
 def make_scatter_matrix(
-    df_wide,
-    indicator_cols: list,
-    col_labels: list,
+    df_wide: pd.DataFrame,
+    indicator_cols: list[str],
+    col_labels: list[str],
     title: str,
     subtitle: str = "",
     source: str = "",
 ) -> go.Figure:
-    """Scatter matrix (lower triangle only) — no trendlines, country name on hover."""
     df = df_wide.dropna(subset=indicator_cols).copy()
     df = df.rename(columns=dict(zip(indicator_cols, col_labels)))
 
@@ -295,20 +361,25 @@ def make_scatter_matrix(
     return fig
 
 
-# ── Correlation heatmap ────────────────────────────────────────────────────────
+# ── Correlation heatmap (Pearson or Spearman) ─────────────────────────────────
 
 def make_corr_heatmap(
-    df_wide,
-    indicator_cols: list,
-    col_labels: list,
+    df_wide: pd.DataFrame,
+    indicator_cols: list[str],
+    col_labels: list[str],
     title: str,
     subtitle: str = "",
     source: str = "",
+    method: str = "pearson",    # "pearson" | "spearman"
 ) -> go.Figure:
-    """Pearson r heatmap — colour + number only, no equations."""
+    """
+    Correlation heatmap. Pearson by default for continuous near-normal
+    data; Spearman (rank) for skewed or ordinal variables — which is
+    the common case for cross-country indicators.
+    """
     df = df_wide[indicator_cols].dropna().copy()
     df.columns = col_labels
-    corr = df.corr(method="pearson").round(2)
+    corr = df.corr(method=method).round(2)
 
     fig = px.imshow(
         corr,
@@ -319,16 +390,16 @@ def make_corr_heatmap(
         template=_TEMPLATE,
         aspect="auto",
     )
+    stat_label = "ρ (Spearman)" if method == "spearman" else "r (Pearson)"
     fig.update_traces(
         texttemplate="%{z:.2f}",
-        hovertemplate="<b>%{x}</b> × <b>%{y}</b><br>r = %{z:.2f}<extra></extra>",
+        hovertemplate="<b>%{x}</b> × <b>%{y}</b><br>"
+                      + stat_label + " = %{z:.2f}<extra></extra>",
     )
     fig.update_coloraxes(
         colorbar=dict(
-            title=dict(text="r", font=dict(size=12)),
-            thickness=14,
-            len=0.6,
-            tickfont=dict(size=11),
+            title=dict(text=stat_label, font=dict(size=12)),
+            thickness=14, len=0.6, tickfont=dict(size=11),
         )
     )
     fig.update_layout(height=max(350, len(col_labels) * 80 + 120))
@@ -339,7 +410,7 @@ def make_corr_heatmap(
 # ── Histogram ─────────────────────────────────────────────────────────────────
 
 def make_histogram(
-    df,
+    df: pd.DataFrame,
     title: str,
     indicator: dict,
     color_scale: str = "Blues",
@@ -348,7 +419,6 @@ def make_histogram(
     xlabel: str = "",
     ylabel: str = "",
 ) -> go.Figure:
-    """Distribution of indicator values across countries for a given period."""
     df = df.dropna(subset=["value"]).copy()
     unit_label = indicator["unit"]
     x_label = xlabel if xlabel else unit_label
@@ -381,7 +451,7 @@ def make_histogram(
 # ── Box plot ──────────────────────────────────────────────────────────────────
 
 def make_box(
-    df,
+    df: pd.DataFrame,
     title: str,
     indicator: dict,
     color_scale: str = "Blues",
@@ -390,7 +460,6 @@ def make_box(
     xlabel: str = "",
     ylabel: str = "",
 ) -> go.Figure:
-    """Distribution across countries — one box per year if time series."""
     df = df.dropna(subset=["value"]).copy()
     unit_label = indicator["unit"]
     y_label = ylabel if ylabel else unit_label
@@ -433,7 +502,7 @@ def make_box(
 # ── Sub-national admin choropleth ─────────────────────────────────────────────
 
 def make_admin_map(
-    df,
+    df: pd.DataFrame,
     geojson: dict,
     title: str,
     color_scale: str = "Blues",
@@ -442,13 +511,9 @@ def make_admin_map(
     subtitle: str = "",
     source: str = "",
 ) -> go.Figure:
-    """Choropleth at admin (ADM1/ADM2) level using a geoBoundaries GeoJSON.
-
-    df must have columns: region (str, matches shapeName), value (float).
-    """
     df = df.dropna(subset=["value", "region"]).copy()
     if log_scale:
-        df, suffix = _apply_log(df)
+        df, suffix = log1p_positive(df)
         unit = f"{unit} {suffix}"
 
     fig = px.choropleth(

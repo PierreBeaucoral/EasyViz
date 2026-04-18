@@ -1,6 +1,15 @@
 """
 Curated catalog of development indicators from OWID and World Bank (WDI).
-Each entry defines source, fetch parameters, unit, and search tags.
+
+Each entry defines the fetch parameters, unit, category, and search tags.
+Indicator metadata (definition, source organisation) is fetched live from
+the World Bank API at display time — see `src.metadata` — so this catalog
+is intentionally minimal and does not duplicate the upstream definitions.
+
+Academic warning: the inclusion of an indicator here is **not** an
+endorsement of its methodology. Several WDI series have known breaks,
+imputation layers, or interpolation. Always consult the upstream
+definition (the citation panel shows it live) before using in a paper.
 """
 
 INDICATORS = [
@@ -557,13 +566,17 @@ INDICATORS = [
         "tags": ["democracy", "accountability", "voice", "governance", "wgi", "civil society", "press freedom"],
     },
     {
-        "id": "press_freedom",
-        "name": "Freedom of the Press Index",
+        # NOTE: the legacy entry here mislabelled `IQ.CPA.IRAI.XQ` as
+        # "Freedom of the Press". That code is CPIA *Transparency,
+        # accountability, and corruption in the public sector*. Relabelled.
+        "id": "cpia_transparency",
+        "name": "CPIA — Transparency, Accountability & Corruption",
         "category": "Governance",
         "source": "wdi",
-        "indicator": "IQ.CPA.IRAI.XQ",
+        "indicator": "IQ.CPA.TRAN.XQ",
         "unit": "CPIA rating (1–6)",
-        "tags": ["press freedom", "media", "governance", "democracy", "accountability"],
+        "tags": ["cpia", "transparency", "accountability", "corruption",
+                 "governance", "ida"],
     },
     # ── ECONOMY (extended 2) ───────────────────────────────────────────────────
     {
