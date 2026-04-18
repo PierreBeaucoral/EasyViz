@@ -93,8 +93,11 @@ DEFAULT = [
 
 # ── Registry ──────────────────────────────────────────────────────────────────
 
+ALL_COUNTRIES_KEY = "All countries"
+
 PRESETS: dict[str, list[str]] = {
     "Default (20 diverse)": DEFAULT,
+    ALL_COUNTRIES_KEY:      [],  # sentinel — resolved to the full dataset at runtime
     "OECD (38)":            OECD,
     "EU27":                 EU27,
     "Sub-Saharan Africa":   SSA,
@@ -106,6 +109,12 @@ PRESETS: dict[str, list[str]] = {
 
 
 def resolve_preset(name: str, all_countries: list[str]) -> list[str]:
-    """Return members of `name` that actually appear in `all_countries`."""
+    """Return members of `name` that actually appear in `all_countries`.
+
+    `All countries` is a sentinel that expands to whatever the caller
+    passes in, so we don't have to maintain a list of every WDI country.
+    """
+    if name == ALL_COUNTRIES_KEY:
+        return list(all_countries)
     members = PRESETS.get(name, [])
     return [c for c in members if c in all_countries]
